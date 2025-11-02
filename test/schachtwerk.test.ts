@@ -7,7 +7,7 @@
 test('SQS Queue Created', () => {
 //   const app = new cdk.App();
 //     // WHEN
-//   const stack = new Schachtwerk.SchachtwerkStack(app, 'MyTestStack');
+//   const stack = new Schachtwerk.Schachtwerk(app, 'MyTestStack');
 //     // THEN
 //   const template = Template.fromStack(stack);
 
