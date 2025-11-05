@@ -21,6 +21,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      CICD_ACCOUNT_ID: ${{ vars.CICD_ACCOUNT_ID }}
+      DEV_ACCOUNT_ID: ${{ vars.DEV_ACCOUNT_ID }}
+      PROD_ACCOUNT_ID: ${{ vars.PROD_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: jdx/mise-action@v2
