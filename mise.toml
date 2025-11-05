@@ -1,0 +1,24 @@
+[tools]
+pnpm = "latest"
+pre-commit = "latest"
+node = "24"
+
+[tasks.install]
+description = "Install all dependencies"
+run = [
+    "pnpm install",
+    "pre-commit install"
+]
+
+[tasks.pre-commit]
+description = "Run pre-commit hooks on all files"
+run = "pre-commit run --all-files"
+
+[tasks.test]
+description = "Run tests on all files"
+run = "pnpm run build && pnpm run test"
+
+[tasks.test-full]
+description = "Run full test suite and synth cdk"
+depends = ["test", "pre-commit"]
+run = "pnpm run cdk synth"

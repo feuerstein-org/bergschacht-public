@@ -1,0 +1,28 @@
+default_stages: [pre-commit]
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # ESLint and Prettier
+  - repo: local
+    hooks:
+      - id: format
+        name: format
+        entry: 'pnpm run format'
+        language: system
+        args: ['--write']
+
+      - id: lint
+        name: lint
+        entry: 'pnpm run lint'
+        language: system
+        args: ['--fix']
