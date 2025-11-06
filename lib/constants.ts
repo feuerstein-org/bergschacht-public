@@ -15,4 +15,4 @@ function getRequiredEnv(key: string): string {
 export const cicdAccount = getRequiredEnv('CICD_ACCOUNT_ID');
 export const devAccount = getRequiredEnv('DEV_ACCOUNT_ID');
 export const prodAccount = getRequiredEnv('PROD_ACCOUNT_ID');
-export const region = process.env.AWS_REGION || 'us-east-1';
+export const cicdRegion = process.env.CICD_REGION || 'us-west-2';

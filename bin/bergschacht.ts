@@ -2,7 +2,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 // import { Bergschacht } from '../lib/bergschacht-stack';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
-import { cicdAccount, devAccount, prodAccount, region } from '../lib/constants';
+import { cicdAccount, devAccount, prodAccount, cicdRegion } from '../lib/constants';
 
 const app = new cdk.App();
 
@@ -13,7 +13,7 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsProd', {
   githubBranch: 'master',
   accountIds: [devAccount, prodAccount],
   deploysToCicdAccount: true, // Only the master branch can deploy to CICD account
-  env: { account: cicdAccount, region },
+  env: { account: cicdAccount, region: cicdRegion },
 });
 
 new GitHubActionsStack(app, 'BergschachtGitHubActionsDev', {
@@ -21,7 +21,7 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsDev', {
   githubRepo: 'bergschacht',
   githubBranch: 'dev',
   accountIds: [devAccount],
-  env: { account: cicdAccount, region },
+  env: { account: cicdAccount, region: cicdRegion },
 });
 
 // Sample application stack for Development
