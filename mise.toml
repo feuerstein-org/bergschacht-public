@@ -44,3 +44,11 @@ run = "pnpm run cdk synth"
 description = "Build & see diff for all stacks, pass a stack name to filter"
 depends = ["build"]
 run = "pnpm run cdk diff"
+
+[tasks.diff-ci]
+description = "Don't build & see diff for all stacks, pass a stack name to filter"
+run = "pnpm run cdk diff"
+
+[tasks.deploy]
+description = "Deploy Stack(s), pass args (stacks) as needed, package is built before deployment"
+run = "pnpm run cdk deploy"
