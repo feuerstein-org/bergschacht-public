@@ -85,6 +85,7 @@ export class GitHubActionsStack extends cdk.Stack {
     if (props.deploysToCicdAccount) {
       githubActionsRole.addToPolicy(
         new iam.PolicyStatement({
+          sid: 'AllowDeployToCICDAccount',
           effect: iam.Effect.ALLOW,
           actions: ['sts:AssumeRole', 'iam:PassRole'],
           resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
@@ -98,6 +99,7 @@ export class GitHubActionsStack extends cdk.Stack {
     props.accountIds.forEach((accountId) =>
       githubActionsRole.addToPolicy(
         new iam.PolicyStatement({
+          sid: 'AllowAssumeRoleInDeploymentAccounts',
           effect: iam.Effect.ALLOW,
           actions: ['sts:AssumeRole'],
           resources: [`arn:aws:iam::${accountId}:role/cdk-*`],

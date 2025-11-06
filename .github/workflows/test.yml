@@ -6,6 +6,11 @@ on:
     branches:
       - master
 
+# Required for OIDC authentication with AWS
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
@@ -35,6 +40,23 @@ jobs:
         run: mise run install
       - name: Build and Test
         run: mise run test
+      - name: Set role name
+        run: |
+          REPO_NAME=${GITHUB_REPOSITORY#*/}
+          if [[ "$GITHUB_REF" == refs/pull/* ]]; then
+            # It's a pull request
+            BRANCH_NAME=$GITHUB_HEAD_REF
+          else
+            # It's a regular push
+            BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          fi
+          echo "ROLE_NAME=${REPO_NAME}-${BRANCH_NAME}-github-actions-role" >> $GITHUB_ENV
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
+          aws-region: ${{ vars.CICD_REGION }}
+          role-session-name: GitHubActions-Test-${{ github.run_id }}
       - name: CDK Synth
         run: pnpm run cdk synth
       - name: CDK Diff
