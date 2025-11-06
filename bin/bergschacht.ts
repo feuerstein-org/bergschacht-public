@@ -7,7 +7,7 @@ import { cicdAccount, devAccount, prodAccount, cicdRegion } from '../lib/constan
 const app = new cdk.App();
 
 // GitHub Actions OIDC Stack - sets up OIDC provider and IAM role for GitHub Actions
-new GitHubActionsStack(app, 'BergschachtGitHubActionsProd', {
+new GitHubActionsStack(app, 'BergschachtGitHubActionsProdCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'master',
@@ -19,7 +19,7 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsProd', {
   env: { account: cicdAccount, region: cicdRegion },
 });
 
-new GitHubActionsStack(app, 'BergschachtGitHubActionsDev', {
+new GitHubActionsStack(app, 'BergschachtGitHubActionsDevCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'dev',

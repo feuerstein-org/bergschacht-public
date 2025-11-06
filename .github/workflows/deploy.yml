@@ -55,4 +55,4 @@ jobs:
 
       - name: CDK Deploy to Production
         if: github.ref == 'refs/heads/master'
-        run: mise run deploy *Prod --require-approval never
+        run: mise run deploy *Prod *Cicd --require-approval never
