@@ -99,7 +99,7 @@ export class GitHubActionsStack extends cdk.Stack {
     props.accountIds.forEach((accountId) =>
       githubActionsRole.addToPolicy(
         new iam.PolicyStatement({
-          sid: 'AllowAssumeRoleInDeploymentAccounts',
+          sid: 'AllowAssumeRoleInDeploymentAccount',
           effect: iam.Effect.ALLOW,
           actions: ['sts:AssumeRole'],
           resources: [`arn:aws:iam::${accountId}:role/cdk-*`],
