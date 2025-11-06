@@ -1,10 +1,12 @@
 name: test
+# For local testing with act see: https://github.com/nektos/act/issues/2370
 
 on:
   pull_request:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 # Required for OIDC authentication with AWS
 permissions:
@@ -15,7 +17,7 @@ jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
         with:
           cache: true
@@ -32,32 +34,21 @@ jobs:
       PROD_ACCOUNT_ID: ${{ vars.PROD_ACCOUNT_ID }}
       CICD_REGION: ${{ vars.CICD_REGION }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
         with:
           cache: true
       - name: Install dependencies
         run: mise run install
-      - name: Build and Test
-        run: mise run test
-      - name: Set role name
-        run: |
-          REPO_NAME=${GITHUB_REPOSITORY#*/}
-          if [[ "$GITHUB_REF" == refs/pull/* ]]; then
-            # It's a pull request
-            BRANCH_NAME=$GITHUB_HEAD_REF
-          else
-            # It's a regular push
-            BRANCH_NAME=${GITHUB_REF#refs/heads/}
-          fi
-          echo "ROLE_NAME=${REPO_NAME}-${BRANCH_NAME}-github-actions-role" >> $GITHUB_ENV
+      - name: Set AWS role name
+        run: echo "ROLE_NAME=${{ github.event.repository.name }}-${{ github.ref_name }}-github-actions-role" >> $GITHUB_ENV
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
           aws-region: ${{ vars.CICD_REGION }}
           role-session-name: GitHubActions-Test-${{ github.run_id }}
-      - name: CDK Synth
-        run: pnpm run cdk synth
-      - name: CDK Diff
-        run: pnpm run cdk diff || true
+      - name: Build
+        run: mise run build
+      - name: Diff CDK
+        run: mise run diff-ci
