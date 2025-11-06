@@ -14,7 +14,10 @@ describe('GitHubActionsStack', () => {
       githubRepo: 'bergschacht',
       githubBranch: 'master',
       deploysToCicdAccount: false,
-      accountIds: ['123456789012', '987654321098'],
+      accountIds: [
+        ['123456789012', 'Dev'],
+        ['987654321098', 'Prod'],
+      ],
     });
     template = Template.fromStack(stack);
   });
@@ -89,8 +92,8 @@ describe('GitHubActionsStack', () => {
   });
 
   test.each([
-    ['no account IDs provided', []],
-    ['empty account ID provided', ['']],
+    ['no account IDs provided', [] as [string, string][]],
+    ['empty account ID provided', [['', '']] as [string, string][]],
   ])('throws error when %s', (_description, accountIds) => {
     expect(() => {
       new GitHubActionsStack(app, 'Invalid', {
@@ -109,7 +112,7 @@ describe('GitHubActionsStack', () => {
       githubRepo: 'bergschacht',
       githubBranch: 'master',
       deploysToCicdAccount: true,
-      accountIds: ['123456789012'],
+      accountIds: [['123456789012', 'Dev']],
     });
     const cicdTemplate = Template.fromStack(cicdStack);
 

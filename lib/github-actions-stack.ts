@@ -22,10 +22,10 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
   readonly githubBranch: string;
 
   /**
-   * AWS account IDs to give permissions to deploy to
-   * @example ['123456789012', '987654321098']
+   * AWS account IDs and names to give permissions to deploy to
+   * @example [['123456789012', 'Dev'], ['987654321098', 'Prod']]
    */
-  readonly accountIds: string[];
+  readonly accountIds: [string, string][];
 
   /**
    * Whether the stack that is being deployed also deploys changes to the CI/CD account itself.
@@ -52,7 +52,7 @@ export class GitHubActionsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: GitHubActionsStackProps) {
     super(scope, id, props);
 
-    if (props.accountIds.length === 0 || props.accountIds[0] === '') {
+    if (props.accountIds.length === 0 || !props.accountIds[0][0] || props.accountIds[0][0] === '') {
       throw new Error('At least one accountId must be provided in accountIds');
     }
 
@@ -99,10 +99,10 @@ export class GitHubActionsStack extends cdk.Stack {
     props.accountIds.forEach((accountId) =>
       githubActionsRole.addToPolicy(
         new iam.PolicyStatement({
-          sid: 'AllowAssumeRoleInDeploymentAccount',
+          sid: `AllowAssumeRoleIn${accountId[1]}Account`,
           effect: iam.Effect.ALLOW,
           actions: ['sts:AssumeRole'],
-          resources: [`arn:aws:iam::${accountId}:role/cdk-*`],
+          resources: [`arn:aws:iam::${accountId[0]}:role/cdk-*`],
         })
       )
     );

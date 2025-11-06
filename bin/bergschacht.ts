@@ -11,7 +11,10 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsProd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'master',
-  accountIds: [devAccount, prodAccount],
+  accountIds: [
+    [devAccount, 'Dev'],
+    [prodAccount, 'Prod'],
+  ],
   deploysToCicdAccount: true, // Only the master branch can deploy to CICD account
   env: { account: cicdAccount, region: cicdRegion },
 });
@@ -20,7 +23,7 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsDev', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'dev',
-  accountIds: [devAccount],
+  accountIds: [[devAccount, 'Dev']],
   env: { account: cicdAccount, region: cicdRegion },
 });
 
