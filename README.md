@@ -4,18 +4,35 @@ This repo deploys all of Feuersteins CDK infrastructure. The deployments are con
 
 ## Getting started
 
-To start developing simply install all the dependencies and get going. You can do that manually (by reviewing the mise file) or use [`mise`](https://mise.jdx.dev/getting-started.html) for that. Simply download it and run the below commands.
+### Installing dependencies
+
+To start developing simply install all the dependencies and get going. You can do that manually (by reviewing the `mise.toml` file) or use [`mise`](https://mise.jdx.dev/getting-started.html) for that. Simply download it and run the below commands.
 
 ```bash
 mise trust
 mise run install # This will install pnpm, pre-commit etc.
-# after that you can use pnpm to format, lint, build and test
+```
+
+### Environment variables
+
+Environment variables are also managed with `mise` if you decide to not use it, review the `mise.toml` file. `mise.toml` only holds placeholders of the real values which is enough to synthesize the stacks.
+
+If you require to use the real values (e.g. for `cdk diff`) you need to create a `mise.local.toml` file which will overwrite the `mise.toml` env files. This file is excluded from version control and is only for local development - all local env variables or secrets should be set there. See `mise.local.example.toml` for the formatting.
+
+> Note: you can find the env variable values in GitHub variables.
+
+### Development
+
+After that you can use `pnpm` to format, lint, build and test. Alternatively you can also use `mise` tasks which under will use `pnpm` under the hood.
+
+```bash
+# Note that in CI all of the below will run
 pnpm run format
 pnpm run lint:fix # or just lint to show the errors
 pnpm run build
 pnpm run watch # watch for changes and compile
 pnpm run test
-# Note that in CI all of the above will run
+
 mise run pre-commit # will execute pre-commit (formatting/linting)
 mise run test # will run pnpm run build & pnpm run test
 ```
@@ -28,11 +45,15 @@ pnpm run cdk diff # compare deployed stack with current state
 pnpm run cdk deploy # deploy to AWS
 ```
 
-To run the full CI at once (format, lint, build, test and cdk synth) run the below
+Or with mise, which will also run build, test, format etc.
 
 ```bash
-mise run test-full
+mise run test-full # You can also pass a Stack name to see the CFN
+mise run synth # will not run tests/lint/formatting, you can pass a Stack name to see the CFN
+mise run synth # same as above but for diff, you can pass a Stack name to see the CFN
 ```
+
+To see all available `mise` tasks run `mise run`.
 
 > Note:
 > `cdk diff` and `cdk deploy` requires permissions to the account. Since deployment for now goes through GitHub actions that wouldn't work. But if you have a ReadOnly permissions (or full permissions to the dev account) you can run these commands.

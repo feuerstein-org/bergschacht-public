@@ -3,6 +3,12 @@ pnpm = "latest"
 pre-commit = "latest"
 node = "24"
 
+[env]
+
+CICD_ACCOUNT_ID = "111111111111"
+DEV_ACCOUNT_ID = "222222222222"
+PROD_ACCOUNT_ID = "333333333333"
+
 [tasks.install]
 description = "Install all dependencies"
 run = [
@@ -14,11 +20,26 @@ run = [
 description = "Run pre-commit hooks on all files"
 run = "pre-commit run --all-files"
 
+[tasks.build]
+description = "Build"
+run = "pnpm run build"
+
 [tasks.test]
-description = "Run tests on all files"
-run = "pnpm run build && pnpm run test"
+description = "Build & run tests on all files"
+depends = ["build"]
+run = "pnpm run test"
 
 [tasks.test-full]
-description = "Run full test suite and synth cdk"
+description = "Build & run full test suite & synth all stack, pass a stack name to see the CFN"
 depends = ["test", "pre-commit"]
 run = "pnpm run cdk synth"
+
+[tasks.synth]
+description = "Build & synthesize all stacks, pass a stack name to see the CFN"
+depends = ["build"]
+run = "pnpm run cdk synth"
+
+[tasks.diff]
+description = "Build & see diff for all stacks, pass a stack name to filter"
+depends = ["build"]
+run = "pnpm run cdk diff"
