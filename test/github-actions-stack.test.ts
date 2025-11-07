@@ -20,9 +20,14 @@ describe('GitHubActionsStack', () => {
       githubRepo: 'bergschacht',
       githubBranch: 'master',
       githubOidcProvider: oidcProvider,
-      accountIds: [
+      deployAccountIds: [
         ['111111111111', 'Dev'],
         ['222222222222', 'Prod'],
+      ],
+      lookupAccountIds: [
+        ['111111111111', 'Dev'],
+        ['222222222222', 'Prod'],
+        ['333333333333', 'Cicd'],
       ],
     });
     template = Template.fromStack(stack);
@@ -55,27 +60,39 @@ describe('GitHubActionsStack', () => {
     });
   });
 
-  test('IAM role has permissions to assume CDK roles', () => {
+  test('IAM role has permissions to assume CDK roles and lookup roles', () => {
     template.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: {
         Statement: [
           {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: [
-              'arn:aws:iam::111111111111:role/cdk-*',
-              'arn:aws:iam::111111111111:role/ReadOnly',
-            ],
-            Sid: 'AllowAssumeRoleInDevAccount',
+            Resource: 'arn:aws:iam::111111111111:role/cdk-*',
+            Sid: 'AllowAssumeDeploymentRoleInDevAccount',
           },
           {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: [
-              'arn:aws:iam::222222222222:role/cdk-*',
-              'arn:aws:iam::222222222222:role/ReadOnly',
-            ],
-            Sid: 'AllowAssumeRoleInProdAccount',
+            Resource: 'arn:aws:iam::222222222222:role/cdk-*',
+            Sid: 'AllowAssumeDeploymentRoleInProdAccount',
+          },
+          {
+            Action: 'sts:AssumeRole',
+            Effect: 'Allow',
+            Resource: 'arn:aws:iam::111111111111:role/cdk-*-lookup-role-*',
+            Sid: 'AllowAssumeLookupRoleInDevAccount',
+          },
+          {
+            Action: 'sts:AssumeRole',
+            Effect: 'Allow',
+            Resource: 'arn:aws:iam::222222222222:role/cdk-*-lookup-role-*',
+            Sid: 'AllowAssumeLookupRoleInProdAccount',
+          },
+          {
+            Action: 'sts:AssumeRole',
+            Effect: 'Allow',
+            Resource: 'arn:aws:iam::333333333333:role/cdk-*-lookup-role-*',
+            Sid: 'AllowAssumeLookupRoleInCicdAccount',
           },
         ],
       },
@@ -90,26 +107,59 @@ describe('GitHubActionsStack', () => {
       },
     });
 
-    template.hasOutput('GitHubActionsAccountIds', {
+    template.hasOutput('GitHubActionsDeployAccountIds', {
       Description: 'AWS account IDs with permissions to deploy to',
       Export: {
-        Name: 'TestGitHubActions-AccountIds',
+        Name: 'TestGitHubActions-DeployAccountIds',
+      },
+    });
+
+    template.hasOutput('GitHubActionsLookupAccountIds', {
+      Description: 'AWS account IDs with permissions to lookup',
+      Export: {
+        Name: 'TestGitHubActions-LookupAccountIds',
       },
     });
   });
 
   test.each([
-    ['no account IDs provided', [] as [string, string][]],
-    ['empty account ID provided', [['', '']] as [string, string][]],
-  ])('throws error when %s', (_description, accountIds) => {
-    expect(() => {
-      new GitHubActionsStack(app, 'Invalid', {
-        githubOrg: 'Feuerstein-Org',
-        githubRepo: 'bergschacht',
-        githubBranch: 'master',
-        githubOidcProvider: oidcProvider,
-        accountIds,
-      });
-    }).toThrow('At least one accountId must be provided in accountIds');
+    [
+      'no account IDs provided',
+      {},
+      'At least one account must be provided in deployAccountIds or lookupAccountIds',
+    ],
+    [
+      'empty deploy account ID provided',
+      { deployAccountIds: [['', '']] as [string, string][] },
+      undefined,
+    ],
+    [
+      'empty lookup account ID provided',
+      { lookupAccountIds: [['', '']] as [string, string][] },
+      undefined,
+    ],
+  ])('throws error when %s', (_description, accountProps, expectedError) => {
+    if (expectedError) {
+      expect(() => {
+        new GitHubActionsStack(app, 'Invalid', {
+          githubOrg: 'Feuerstein-Org',
+          githubRepo: 'bergschacht',
+          githubBranch: 'master',
+          githubOidcProvider: oidcProvider,
+          ...accountProps,
+        });
+      }).toThrow(expectedError);
+    } else {
+      // Should not throw for empty string account IDs (will just create empty policy)
+      expect(() => {
+        new GitHubActionsStack(app, 'Invalid', {
+          githubOrg: 'Feuerstein-Org',
+          githubRepo: 'bergschacht',
+          githubBranch: 'master',
+          githubOidcProvider: oidcProvider,
+          ...accountProps,
+        });
+      }).not.toThrow();
+    }
   });
 });

@@ -24,19 +24,16 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
   /**
    * AWS account IDs and names to give permissions to deploy to
    * @example [['123456789012', 'Dev'], ['987654321098', 'Prod']]
+   * @default - No deployment permissions
    */
-  readonly accountIds: [string, string][];
+  readonly deployAccountIds?: [string, string][];
 
   /**
-   * Whether the stack that is being deployed also deploys changes to the CI/CD account itself.
-   * When true, the created role will be granted additional permissions required to deploy to the CI/CD account
-   * (specifically `iam:PassRole` and allow assuming the CDK deploy role in the CICD account).
-   *
-   * Note: Don't set this to true if non-2PR branches since that would allow someone
-   * to deploy a change to the CI/CD account, escalate permissions and then deploy malicious code to prod.
-   * @default false
+   * AWS account IDs and names to give permissions to lookup (read-only access)
+   * @example [['123456789012', 'Dev'], ['987654321098', 'Prod']]
+   * @default - No lookup permissions
    */
-  readonly deploysToCicdAccount?: boolean;
+  readonly lookupAccountIds?: [string, string][];
 
   /**
    * The GitHub OIDC provider to use for authentication.
@@ -58,8 +55,13 @@ export class GitHubActionsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: GitHubActionsStackProps) {
     super(scope, id, props);
 
-    if (props.accountIds.length === 0 || !props.accountIds[0][0] || props.accountIds[0][0] === '') {
-      throw new Error('At least one accountId must be provided in accountIds');
+    const deployAccountIds = props.deployAccountIds ?? [];
+    const lookupAccountIds = props.lookupAccountIds ?? [];
+
+    if (deployAccountIds.length === 0 && lookupAccountIds.length === 0) {
+      throw new Error(
+        'At least one account must be provided in deployAccountIds or lookupAccountIds'
+      );
     }
 
     // Format: repo:ORG/REPO:ref:refs/heads/BRANCH
@@ -80,17 +82,26 @@ export class GitHubActionsStack extends cdk.Stack {
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 
-    // Grant cross-account permissions to assume CDK & ReadOnly roles in deployment accounts
-    props.accountIds.forEach((accountId) =>
+    // Grant cross-account permissions to assume CDK roles in deployment accounts
+    deployAccountIds.forEach((accountId) =>
       githubActionsRole.addToPolicy(
         new iam.PolicyStatement({
-          sid: `AllowAssumeRoleIn${accountId[1]}Account`,
+          sid: `AllowAssumeDeploymentRoleIn${accountId[1]}Account`,
           effect: iam.Effect.ALLOW,
           actions: ['sts:AssumeRole'],
-          resources: [
-            `arn:aws:iam::${accountId[0]}:role/cdk-*`,
-            `arn:aws:iam::${accountId[0]}:role/ReadOnly`,
-          ],
+          resources: [`arn:aws:iam::${accountId[0]}:role/cdk-*`],
+        })
+      )
+    );
+
+    // Grant cross-account permissions to assume CDK lookup roles in lookup accounts
+    lookupAccountIds.forEach((accountId) =>
+      githubActionsRole.addToPolicy(
+        new iam.PolicyStatement({
+          sid: `AllowAssumeLookupRoleIn${accountId[1]}Account`,
+          effect: iam.Effect.ALLOW,
+          actions: ['sts:AssumeRole'],
+          resources: [`arn:aws:iam::${accountId[0]}:role/cdk-*-lookup-role-*`],
         })
       )
     );
@@ -105,10 +116,21 @@ export class GitHubActionsStack extends cdk.Stack {
     });
 
     // output the accounts to deploy to
-    new cdk.CfnOutput(this, 'GitHubActionsAccountIds', {
-      value: props.accountIds.map(([id, name]) => `${name}:${id}`).join(', '),
-      description: 'AWS account IDs with permissions to deploy to',
-      exportName: `${id}-AccountIds`,
-    });
+    if (deployAccountIds.length > 0) {
+      new cdk.CfnOutput(this, 'GitHubActionsDeployAccountIds', {
+        value: deployAccountIds.map(([id, name]) => `${name}:${id}`).join(', '),
+        description: 'AWS account IDs with permissions to deploy to',
+        exportName: `${id}-DeployAccountIds`,
+      });
+    }
+
+    // output the accounts to lookup
+    if (lookupAccountIds.length > 0) {
+      new cdk.CfnOutput(this, 'GitHubActionsLookupAccountIds', {
+        value: lookupAccountIds.map(([id, name]) => `${name}:${id}`).join(', '),
+        description: 'AWS account IDs with permissions to lookup',
+        exportName: `${id}-LookupAccountIds`,
+      });
+    }
   }
 }

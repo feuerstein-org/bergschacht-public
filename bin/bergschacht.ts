@@ -18,7 +18,7 @@ new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'master',
-  accountIds: [
+  deployAccountIds: [
     [cicdAccount, 'Cicd'],
     [prodAccount, 'Prod'],
     [devAccount, 'Dev'],
@@ -31,12 +31,19 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'dev',
-  accountIds: [[devAccount, 'Dev']],
+  deployAccountIds: [[devAccount, 'Dev']],
+  lookupAccountIds: [
+    [cicdAccount, 'Cicd'],
+    [prodAccount, 'Prod'],
+    [devAccount, 'Dev'],
+  ],
   githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: awsRegion },
 });
 
-// ReadOnly Role Stacks - deploy read-only roles in each account for CI/CD access
+// ReadOnly Role Stacks - later this should be used for monitoring
+// Currently just a sample deployment trusting CI/CD account
+// TODO: Delete after using real monitoring roles
 const readOnlyRoleAccounts = [
   { name: 'Cicd', account: cicdAccount },
   { name: 'Dev', account: devAccount },
@@ -45,7 +52,7 @@ const readOnlyRoleAccounts = [
 
 readOnlyRoleAccounts.forEach(({ name, account }) => {
   new ReadOnlyRoleStack(app, `ReadOnlyRole${name}`, {
-    trustedArns: [cicdAccount, devAccount],
+    trustedArns: [cicdAccount],
     env: { account, region: awsRegion },
   });
 });
