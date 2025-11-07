@@ -37,6 +37,12 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
    * @default false
    */
   readonly deploysToCicdAccount?: boolean;
+
+  /**
+   * The GitHub OIDC provider to use for authentication.
+   * This should be created once in the CI/CD account using GitHubOIDCProviderStack.
+   */
+  readonly githubOidcProvider: iam.IOpenIdConnectProvider;
 }
 
 /**
@@ -56,11 +62,6 @@ export class GitHubActionsStack extends cdk.Stack {
       throw new Error('At least one accountId must be provided in accountIds');
     }
 
-    const githubProvider = new iam.OpenIdConnectProvider(this, 'GitHubOIDCProvider', {
-      url: 'https://token.actions.githubusercontent.com',
-      clientIds: ['sts.amazonaws.com'],
-    });
-
     // Format: repo:ORG/REPO:ref:refs/heads/BRANCH
     const trusted_branch: string = `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/heads/${props.githubBranch}`;
 
@@ -76,7 +77,7 @@ export class GitHubActionsStack extends cdk.Stack {
     const githubActionsRole = new iam.Role(this, 'GitHubActionsRole', {
       roleName: `${props.githubRepo}-${props.githubBranch}-github-actions-role`,
       description: `Role for GitHub Actions to deploy ${props.githubRepo}-${props.githubBranch} CDK stacks`,
-      assumedBy: new iam.OpenIdConnectPrincipal(githubProvider, conditions),
+      assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 
     // Grant permission to assume the CDK deploy role in the CI/CD account
@@ -121,12 +122,6 @@ export class GitHubActionsStack extends cdk.Stack {
       value: props.accountIds.join(','),
       description: 'AWS account IDs with permissions to deploy to',
       exportName: `${id}-AccountIds`,
-    });
-
-    new cdk.CfnOutput(this, 'GitHubOIDCProviderArn', {
-      value: githubProvider.openIdConnectProviderArn,
-      description: 'ARN of the GitHub OIDC provider',
-      exportName: `${id}-OIDCProviderArn`,
     });
   }
 }

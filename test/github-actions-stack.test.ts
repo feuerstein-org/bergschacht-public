@@ -1,19 +1,26 @@
 import * as cdk from 'aws-cdk-lib/core';
+import { IOpenIdConnectProvider } from 'aws-cdk-lib/aws-iam';
 import { Template } from 'aws-cdk-lib/assertions';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
+import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 
 describe('GitHubActionsStack', () => {
   let app: cdk.App;
+  let oidcProvider: IOpenIdConnectProvider;
   let stack: GitHubActionsStack;
   let template: Template;
 
   beforeEach(() => {
     app = new cdk.App();
+    const oidcStack = new GitHubOIDCProviderStack(app, 'TestOIDCProvider');
+    oidcProvider = oidcStack.provider;
+
     stack = new GitHubActionsStack(app, 'TestGitHubActions', {
       githubOrg: 'Feuerstein-Org',
       githubRepo: 'bergschacht',
       githubBranch: 'master',
       deploysToCicdAccount: false,
+      githubOidcProvider: oidcProvider,
       accountIds: [
         ['123456789012', 'Dev'],
         ['987654321098', 'Prod'],
@@ -82,13 +89,6 @@ describe('GitHubActionsStack', () => {
         Name: 'TestGitHubActions-AccountIds',
       },
     });
-
-    template.hasOutput('GitHubOIDCProviderArn', {
-      Description: 'ARN of the GitHub OIDC provider',
-      Export: {
-        Name: 'TestGitHubActions-OIDCProviderArn',
-      },
-    });
   });
 
   test.each([
@@ -100,6 +100,7 @@ describe('GitHubActionsStack', () => {
         githubOrg: 'Feuerstein-Org',
         githubRepo: 'bergschacht',
         githubBranch: 'master',
+        githubOidcProvider: oidcProvider,
         accountIds,
       });
     }).toThrow('At least one accountId must be provided in accountIds');
@@ -107,11 +108,13 @@ describe('GitHubActionsStack', () => {
 
   test('IAM role has permissions to deploy to CI/CD account when deploysToCicdAccount is true', () => {
     const cicdApp = new cdk.App();
+    const cicdOidcStack = new GitHubOIDCProviderStack(cicdApp, 'TestCICDOIDCProvider');
     const cicdStack = new GitHubActionsStack(cicdApp, 'TestCICDGitHubActions', {
       githubOrg: 'Feuerstein-Org',
       githubRepo: 'bergschacht',
       githubBranch: 'master',
       deploysToCicdAccount: true,
+      githubOidcProvider: cicdOidcStack.provider,
       accountIds: [['123456789012', 'Dev']],
     });
     const cicdTemplate = Template.fromStack(cicdStack);

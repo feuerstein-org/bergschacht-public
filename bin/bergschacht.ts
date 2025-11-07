@@ -2,11 +2,17 @@
 import * as cdk from 'aws-cdk-lib/core';
 // import { Bergschacht } from '../lib/bergschacht-stack';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
+import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 import { cicdAccount, devAccount, prodAccount, cicdRegion } from '../lib/constants';
 
 const app = new cdk.App();
 
-// GitHub Actions OIDC Stack - sets up OIDC provider and IAM role for GitHub Actions
+// GitHub OIDC Provider Stack - creates the OIDC provider once per account
+const githubOidcProviderStack = new GitHubOIDCProviderStack(app, 'GitHubOIDCProviderCicd', {
+  env: { account: cicdAccount, region: cicdRegion },
+});
+
+// GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy to other accounts from Ci/CD account
 new GitHubActionsStack(app, 'BergschachtGitHubActionsProdCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
@@ -16,6 +22,7 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsProdCicd', {
     [prodAccount, 'Prod'],
   ],
   deploysToCicdAccount: true, // Only the master branch can deploy to CICD account
+  githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: cicdRegion },
 });
 
@@ -24,6 +31,7 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsDevCicd', {
   githubRepo: 'bergschacht',
   githubBranch: 'dev',
   accountIds: [[devAccount, 'Dev']],
+  githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: cicdRegion },
 });
 

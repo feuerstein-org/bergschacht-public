@@ -53,6 +53,10 @@ jobs:
         if: github.ref == 'refs/heads/dev'
         run: mise run deploy *Dev --require-approval never
 
+      - name: CDK Deploy to CI/CD
+        if: github.ref == 'refs/heads/master'
+        run: mise run deploy *Cicd --require-approval never
+
       - name: CDK Deploy to Production
         if: github.ref == 'refs/heads/master'
-        run: mise run deploy *Prod *Cicd --require-approval never
+        run: mise run deploy *Prod --require-approval never
