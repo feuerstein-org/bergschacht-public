@@ -18,10 +18,10 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsProdCicd', {
   githubRepo: 'bergschacht',
   githubBranch: 'master',
   accountIds: [
-    [devAccount, 'Dev'],
+    [cicdAccount, 'Cicd'],
     [prodAccount, 'Prod'],
+    [devAccount, 'Dev'],
   ],
-  deploysToCicdAccount: true, // Only the master branch can deploy to CICD account
   githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: cicdRegion },
 });

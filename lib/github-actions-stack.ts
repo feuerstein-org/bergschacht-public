@@ -80,20 +80,6 @@ export class GitHubActionsStack extends cdk.Stack {
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 
-    // Grant permission to assume the CDK deploy role in the CI/CD account
-    // Only grant this to the master branch role to avoid allowing non-master branches
-    // to perform deployments into the CI/CD account itself.
-    if (props.deploysToCicdAccount) {
-      githubActionsRole.addToPolicy(
-        new iam.PolicyStatement({
-          sid: 'AllowDeployToCICDAccount',
-          effect: iam.Effect.ALLOW,
-          actions: ['sts:AssumeRole', 'iam:PassRole'],
-          resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
-        })
-      );
-    }
-
     // TODO: Additionally give perms to a ReadOnly role in the account
     // This role need to be deployed first by some type of basestack for each acc
     // Grant cross-account permissions to assume CDK roles in deployment accounts
@@ -119,7 +105,7 @@ export class GitHubActionsStack extends cdk.Stack {
 
     // output the accounts to deploy to
     new cdk.CfnOutput(this, 'GitHubActionsAccountIds', {
-      value: props.accountIds.join(','),
+      value: props.accountIds.map(([id, name]) => `${name}:${id}`).join(', '),
       description: 'AWS account IDs with permissions to deploy to',
       exportName: `${id}-AccountIds`,
     });

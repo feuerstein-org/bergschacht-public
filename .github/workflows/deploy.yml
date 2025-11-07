@@ -49,8 +49,8 @@ jobs:
       - name: Diff CDK
         run: mise run diff-ci
 
+      # Always deploy to Dev on dev or master branch
       - name: CDK Deploy to Dev
-        if: github.ref == 'refs/heads/dev'
         run: mise run deploy *Dev --require-approval never
 
       - name: CDK Deploy to CI/CD

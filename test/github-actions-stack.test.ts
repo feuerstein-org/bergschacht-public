@@ -19,11 +19,10 @@ describe('GitHubActionsStack', () => {
       githubOrg: 'Feuerstein-Org',
       githubRepo: 'bergschacht',
       githubBranch: 'master',
-      deploysToCicdAccount: false,
       githubOidcProvider: oidcProvider,
       accountIds: [
-        ['123456789012', 'Dev'],
-        ['987654321098', 'Prod'],
+        ['111111111111', 'Dev'],
+        ['222222222222', 'Prod'],
       ],
     });
     template = Template.fromStack(stack);
@@ -63,12 +62,12 @@ describe('GitHubActionsStack', () => {
           {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: 'arn:aws:iam::123456789012:role/cdk-*',
+            Resource: 'arn:aws:iam::111111111111:role/cdk-*',
           },
           {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: 'arn:aws:iam::987654321098:role/cdk-*',
+            Resource: 'arn:aws:iam::222222222222:role/cdk-*',
           },
         ],
       },
@@ -104,38 +103,5 @@ describe('GitHubActionsStack', () => {
         accountIds,
       });
     }).toThrow('At least one accountId must be provided in accountIds');
-  });
-
-  test('IAM role has permissions to deploy to CI/CD account when deploysToCicdAccount is true', () => {
-    const cicdApp = new cdk.App();
-    const cicdOidcStack = new GitHubOIDCProviderStack(cicdApp, 'TestCICDOIDCProvider');
-    const cicdStack = new GitHubActionsStack(cicdApp, 'TestCICDGitHubActions', {
-      githubOrg: 'Feuerstein-Org',
-      githubRepo: 'bergschacht',
-      githubBranch: 'master',
-      deploysToCicdAccount: true,
-      githubOidcProvider: cicdOidcStack.provider,
-      accountIds: [['123456789012', 'Dev']],
-    });
-    const cicdTemplate = Template.fromStack(cicdStack);
-
-    cicdTemplate.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: [
-          {
-            Action: ['sts:AssumeRole', 'iam:PassRole'],
-            Effect: 'Allow',
-            Resource: {
-              'Fn::Join': ['', ['arn:aws:iam::', { Ref: 'AWS::AccountId' }, ':role/cdk-*']],
-            },
-          },
-          {
-            Action: 'sts:AssumeRole',
-            Effect: 'Allow',
-            Resource: 'arn:aws:iam::123456789012:role/cdk-*',
-          },
-        ],
-      },
-    });
   });
 });

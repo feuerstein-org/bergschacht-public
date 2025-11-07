@@ -60,7 +60,8 @@ To see all available `mise` tasks run `mise run`.
 
 ## Project Structure
 
-- `lib/github-actions-stack.ts` - GitHub Actions OIDC authentication stack
+- `lib/github-oidc-provider-stack.ts` - GitHub OIDC provider stack to CI/CD account
+- `lib/github-actions-stack.ts` - GitHub Actions IAM role stack also deployed to CI/CD account - allows deployment into Prod & Dev accounts
 - `lib/constants.ts` - Account mapping and other constants
 - `bin/bergschacht.ts` - CDK app entry point with branch to account mapping
 
@@ -81,11 +82,18 @@ If you need to add a new account, branch or new branch-to-account mapping, see b
 
 ## Stacks
 
+### GitHubOIDCProviderCicd
+
+This stack creates the GitHub OIDC provider in the CI/CD account:
+
+This needs to be deployed only once to the CI/CD account, then `GitHubActionsStack` instances deploy roles that allow GitHub actions to assume roles and deploy to other accoutns. The OIDC provider is then shared across all GitHub Actions roles in that account.
+
 ### BergschachtGitHubActions
 
 This stack sets up GitHub Actions to deploy CDK stacks using OIDC:
 
-- Creates an OIDC identity provider for GitHub
+- Creates IAM roles that trust the GitHub OIDC provider
+- Configures trust policies to restrict access to specific GitHub repositories and branches
 - Configures necessary permissions for CDK deployments in other accounts
 
 > Note: Only the master branch role itself has an additional permission (`iam:PassRole`) to allow deployments to the CI/CD account itself. If all roles would have it - this would allow someone to deploy changes to the CI/CD account and subsequently all other accounts without a 2PR.
