@@ -62,12 +62,20 @@ describe('GitHubActionsStack', () => {
           {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: 'arn:aws:iam::111111111111:role/cdk-*',
+            Resource: [
+              'arn:aws:iam::111111111111:role/cdk-*',
+              'arn:aws:iam::111111111111:role/ReadOnly',
+            ],
+            Sid: 'AllowAssumeRoleInDevAccount',
           },
           {
             Action: 'sts:AssumeRole',
             Effect: 'Allow',
-            Resource: 'arn:aws:iam::222222222222:role/cdk-*',
+            Resource: [
+              'arn:aws:iam::222222222222:role/cdk-*',
+              'arn:aws:iam::222222222222:role/ReadOnly',
+            ],
+            Sid: 'AllowAssumeRoleInProdAccount',
           },
         ],
       },

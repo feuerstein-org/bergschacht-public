@@ -80,16 +80,17 @@ export class GitHubActionsStack extends cdk.Stack {
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 
-    // TODO: Additionally give perms to a ReadOnly role in the account
-    // This role need to be deployed first by some type of basestack for each acc
-    // Grant cross-account permissions to assume CDK roles in deployment accounts
+    // Grant cross-account permissions to assume CDK & ReadOnly roles in deployment accounts
     props.accountIds.forEach((accountId) =>
       githubActionsRole.addToPolicy(
         new iam.PolicyStatement({
           sid: `AllowAssumeRoleIn${accountId[1]}Account`,
           effect: iam.Effect.ALLOW,
           actions: ['sts:AssumeRole'],
-          resources: [`arn:aws:iam::${accountId[0]}:role/cdk-*`],
+          resources: [
+            `arn:aws:iam::${accountId[0]}:role/cdk-*`,
+            `arn:aws:iam::${accountId[0]}:role/ReadOnly`,
+          ],
         })
       )
     );

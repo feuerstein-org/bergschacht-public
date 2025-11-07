@@ -24,7 +24,7 @@ jobs:
       CICD_ACCOUNT_ID: ${{ vars.CICD_ACCOUNT_ID }}
       DEV_ACCOUNT_ID: ${{ vars.DEV_ACCOUNT_ID }}
       PROD_ACCOUNT_ID: ${{ vars.PROD_ACCOUNT_ID }}
-      CICD_REGION: ${{ vars.CICD_REGION }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -40,7 +40,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
-          aws-region: ${{ vars.CICD_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
           role-session-name: GitHubActions-Deploy-${{ github.run_id }}
 
       - name: Build

@@ -62,6 +62,7 @@ To see all available `mise` tasks run `mise run`.
 
 - `lib/github-oidc-provider-stack.ts` - GitHub OIDC provider stack to CI/CD account
 - `lib/github-actions-stack.ts` - GitHub Actions IAM role stack also deployed to CI/CD account - allows deployment into Prod & Dev accounts
+- `lib/readonly-role-stack.ts` - ReadOnly IAM role stack deployed to each account for monitoring and inspection
 - `lib/constants.ts` - Account mapping and other constants
 - `bin/bergschacht.ts` - CDK app entry point with branch to account mapping
 
@@ -88,7 +89,7 @@ This stack creates the GitHub OIDC provider in the CI/CD account:
 
 This needs to be deployed only once to the CI/CD account, then `GitHubActionsStack` instances deploy roles that allow GitHub actions to assume roles and deploy to other accoutns. The OIDC provider is then shared across all GitHub Actions roles in that account.
 
-### BergschachtGitHubActions
+### GitHubActions
 
 This stack sets up GitHub Actions to deploy CDK stacks using OIDC:
 
@@ -96,10 +97,16 @@ This stack sets up GitHub Actions to deploy CDK stacks using OIDC:
 - Configures trust policies to restrict access to specific GitHub repositories and branches
 - Configures necessary permissions for CDK deployments in other accounts
 
-> Note: Only the master branch role itself has an additional permission (`iam:PassRole`) to allow deployments to the CI/CD account itself. If all roles would have it - this would allow someone to deploy changes to the CI/CD account and subsequently all other accounts without a 2PR.
-
 Any time a new account requires deployments or a new branch needs to be deployed use this stack.
 
 If you are adding a new account run `cdk bootstrap --trust <cicd-account-id> --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess` to bootstrap the new account while allowing the CI/CD account to access it.
 
 Then modify `lib/constants.ts` as well as `bin/bergschacht.ts` to specify what to deploy, finally add the aws account Id to GitHub secrets.
+
+### ReadOnlyRole
+
+This stack creates a read-only IAM role in each account (CI/CD, Dev, Prod) that can be assumed by the CI/CD account:
+
+- Creates an IAM role with AWS managed `ReadOnlyAccess` policy
+- Allows the CI/CD account (and GitHubActions roles) to assume the role for monitoring and inspection
+- If needed new ARNs can be added to trusted entities

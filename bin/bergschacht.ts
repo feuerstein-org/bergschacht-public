@@ -3,17 +3,18 @@ import * as cdk from 'aws-cdk-lib/core';
 // import { Bergschacht } from '../lib/bergschacht-stack';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
 import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
-import { cicdAccount, devAccount, prodAccount, cicdRegion } from '../lib/constants';
+import { ReadOnlyRoleStack } from '../lib/readonly-role-stack';
+import { cicdAccount, devAccount, prodAccount, awsRegion } from '../lib/constants';
 
 const app = new cdk.App();
 
 // GitHub OIDC Provider Stack - creates the OIDC provider once per account
 const githubOidcProviderStack = new GitHubOIDCProviderStack(app, 'GitHubOIDCProviderCicd', {
-  env: { account: cicdAccount, region: cicdRegion },
+  env: { account: cicdAccount, region: awsRegion },
 });
 
 // GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy to other accounts from Ci/CD account
-new GitHubActionsStack(app, 'BergschachtGitHubActionsProdCicd', {
+new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'master',
@@ -23,16 +24,30 @@ new GitHubActionsStack(app, 'BergschachtGitHubActionsProdCicd', {
     [devAccount, 'Dev'],
   ],
   githubOidcProvider: githubOidcProviderStack.provider,
-  env: { account: cicdAccount, region: cicdRegion },
+  env: { account: cicdAccount, region: awsRegion },
 });
 
-new GitHubActionsStack(app, 'BergschachtGitHubActionsDevCicd', {
+new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   githubOrg: 'Feuerstein-Org',
   githubRepo: 'bergschacht',
   githubBranch: 'dev',
   accountIds: [[devAccount, 'Dev']],
   githubOidcProvider: githubOidcProviderStack.provider,
-  env: { account: cicdAccount, region: cicdRegion },
+  env: { account: cicdAccount, region: awsRegion },
+});
+
+// ReadOnly Role Stacks - deploy read-only roles in each account for CI/CD access
+const readOnlyRoleAccounts = [
+  { name: 'Cicd', account: cicdAccount },
+  { name: 'Dev', account: devAccount },
+  { name: 'Prod', account: prodAccount },
+];
+
+readOnlyRoleAccounts.forEach(({ name, account }) => {
+  new ReadOnlyRoleStack(app, `ReadOnlyRole${name}`, {
+    trustedArns: [cicdAccount, devAccount],
+    env: { account, region: awsRegion },
+  });
 });
 
 // Sample application stack for Development
