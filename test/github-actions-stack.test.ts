@@ -16,7 +16,7 @@ describe('GitHubActionsStack', () => {
     oidcProvider = oidcStack.provider;
 
     stack = new GitHubActionsStack(app, 'TestGitHubActions', {
-      githubOrg: 'Feuerstein-Org',
+      githubOrg: 'feuerstein-org',
       githubRepo: 'bergschacht',
       githubBranch: 'master',
       githubOidcProvider: oidcProvider,
@@ -50,7 +50,7 @@ describe('GitHubActionsStack', () => {
               StringEquals: {
                 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
                 'token.actions.githubusercontent.com:sub':
-                  'repo:Feuerstein-Org/bergschacht:ref:refs/heads/master',
+                  'repo:feuerstein-org/bergschacht:ref:refs/heads/master',
               },
             },
             Effect: 'Allow',
@@ -142,7 +142,7 @@ describe('GitHubActionsStack', () => {
     if (expectedError) {
       expect(() => {
         new GitHubActionsStack(app, 'Invalid', {
-          githubOrg: 'Feuerstein-Org',
+          githubOrg: 'feuerstein-org',
           githubRepo: 'bergschacht',
           githubBranch: 'master',
           githubOidcProvider: oidcProvider,
@@ -153,7 +153,7 @@ describe('GitHubActionsStack', () => {
       // Should not throw for empty string account IDs (will just create empty policy)
       expect(() => {
         new GitHubActionsStack(app, 'Invalid', {
-          githubOrg: 'Feuerstein-Org',
+          githubOrg: 'feuerstein-org',
           githubRepo: 'bergschacht',
           githubBranch: 'master',
           githubOidcProvider: oidcProvider,

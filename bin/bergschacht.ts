@@ -15,7 +15,7 @@ const githubOidcProviderStack = new GitHubOIDCProviderStack(app, 'GitHubOIDCProv
 
 // GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy to other accounts from Ci/CD account
 new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
-  githubOrg: 'Feuerstein-Org',
+  githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',
   githubBranch: 'master',
   deployAccountIds: [
@@ -28,7 +28,7 @@ new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
 });
 
 new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
-  githubOrg: 'Feuerstein-Org',
+  githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',
   githubBranch: 'dev',
   deployAccountIds: [[devAccount, 'Dev']],

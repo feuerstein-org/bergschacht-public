@@ -5,7 +5,7 @@ import { Construct } from 'constructs';
 export interface GitHubActionsStackProps extends cdk.StackProps {
   /**
    * GitHub organization or user name
-   * @example 'Feuerstein-Org'
+   * @example 'feuerstein-org'
    */
   readonly githubOrg: string;
 
