@@ -15,11 +15,11 @@ mise run install # This will install pnpm, pre-commit etc.
 
 ### Environment variables
 
-Environment variables are also managed with `mise` if you decide to not use it, review the `mise.toml` file. `mise.toml` only holds placeholders of the real values which is enough to synthesize the stacks.
+Environment variables are also managed with `mise` if you decide to not use it, review the `mise.toml` file. `mise.toml` should hold the same values as they are present in the github environment variables this is enough to both synthesize and diff the stacks (`cdk synth` and `cdk diff`).
 
-If you require to use the real values (e.g. for `cdk diff`) you need to create a `mise.local.toml` file which will overwrite the `mise.toml` env files. This file is excluded from version control and is only for local development - all local env variables or secrets should be set there. See `mise.local.example.toml` for the formatting.
+You can also override the values by creating a local `mise.local.toml` file which will overwrite the `mise.toml` env files. This file is excluded from version control and is only for local development - all local env variables or secrets can be set there. See `mise.local.example.toml` for the formatting.
 
-> Note: you can find the env variable values in GitHub variables.
+> Note: you can find the "real" env variable values in GitHub variables.
 
 ### Development
 

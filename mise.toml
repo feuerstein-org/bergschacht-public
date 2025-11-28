@@ -4,11 +4,11 @@ pre-commit = "latest"
 node = "24"
 
 [env]
-
 CICD_ACCOUNT_ID = "111111111111"
 DEV_ACCOUNT_ID = "222222222222"
-PROD_ACCOUNT_ID = "333333333333"
+PROD_ACCOUNT_ID = "444444444444"
 CICD_REGION = "us-west-2"
+ECR_REPOSITORY_NAME = "feuerstein"
 
 [tasks.install]
 description = "Install all dependencies"
