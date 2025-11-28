@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 
 export interface ReadOnlyRoleStackProps extends cdk.StackProps {
@@ -38,6 +39,21 @@ export class ReadOnlyRoleStack extends cdk.Stack {
     });
 
     this.role = readOnlyRole;
+
+    // Suppress CDK Nag warnings for AWS managed policy
+    // The ReadOnlyAccess policy is intentionally used for broad read access
+    NagSuppressions.addResourceSuppressions(
+      readOnlyRole,
+      [
+        {
+          id: 'AwsSolutions-IAM4',
+          reason:
+            'AWS managed ReadOnlyAccess policy is intentionally used to provide broad read-only access for monitoring and inspection purposes.',
+          appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/ReadOnlyAccess'],
+        },
+      ],
+      true
+    );
 
     // Output the role ARN for reference
     new cdk.CfnOutput(this, 'ReadOnlyRoleArn', {

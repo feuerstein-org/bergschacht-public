@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib/core';
+import { AwsSolutionsChecks } from 'cdk-nag';
 // import { Bergschacht } from '../lib/bergschacht-stack';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
 import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
@@ -8,12 +9,15 @@ import { cicdAccount, devAccount, prodAccount, awsRegion } from '../lib/constant
 
 const app = new cdk.App();
 
+// Add CDK Nag checks to all stacks
+cdk.Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
+
 // GitHub OIDC Provider Stack - creates the OIDC provider once per account
 const githubOidcProviderStack = new GitHubOIDCProviderStack(app, 'GitHubOIDCProviderCicd', {
   env: { account: cicdAccount, region: awsRegion },
 });
 
-// GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy to other accounts from Ci/CD account
+// GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy to other accounts from CI/CD account
 new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',

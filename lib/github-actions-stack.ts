@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 
 export interface GitHubActionsStackProps extends cdk.StackProps {
@@ -107,6 +108,21 @@ export class GitHubActionsStack extends cdk.Stack {
     );
 
     this.role = githubActionsRole;
+
+    // Suppress CDK Nag warnings for wildcard permissions in CDK role ARNs
+    // These wildcards are necessary to allow GitHub Actions to assume CDK bootstrap roles
+    NagSuppressions.addResourceSuppressionsByPath(
+      this,
+      `${this.stackName}/GitHubActionsRole/DefaultPolicy/Resource`,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Wildcard permissions are required for CDK deployment roles to allow GitHub Actions to assume the appropriate bootstrap roles in target accounts.',
+        },
+      ],
+      true
+    );
 
     // Output the role ARN for use in GitHub Actions
     new cdk.CfnOutput(this, 'RoleArn', {
