@@ -70,14 +70,14 @@ To see all available `mise` tasks run `mise run`.
 
 Deployments are controlled through GitHub Actions OIDC stacks that enforce branch-to-account permissions:
 
-- **`master` branch** → deploys to Dev and Prod accounts
-- **`dev` branch** → deploys to Dev account only
+- **`master` branch** → deploys to Dev, Prod and CI/CD accounts
+- **Pull requests** → deploy to Dev account only (if tests and pre-commit checks pass)
 
 This means the branches specified here will have permissions to assume an OIDC role and make a deployment to the specified accounts.
 
-After a change is deployed to a branch, Github actions will assume the OIDC role (deployed via this repo), then assume a role in the target account (currently the `cdk` role) and then perform the deployment.
+**Important**: Any push to a branch with a pull request opn will trigger a deployment to the Dev account, provided that the tests and pre-commit checks pass successfully.
 
-This means that no changes from unapproved branches will go to production accounts while at the same time dev branches can deploy to dev accounts without hassle, e.g. no 2PR etc.
+This means that no changes from unapproved branches will go to production accounts while at the same time branches besides `master` can deploy to dev accounts without hassle, e.g. no 2PR etc. This has the potential of causing issues later where different branches deploy changes to the dev account and break something. In that case we would need to either create more accounts for testing or deploy to the dev account only through a specific `dev` branch.
 
 If you need to add a new account, branch or new branch-to-account mapping, see below.
 

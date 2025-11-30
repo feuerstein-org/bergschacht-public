@@ -17,10 +17,11 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
   readonly githubRepo: string;
 
   /**
-   * Restrict to specific branch
+   * Restrict to specific branch. If not provided, allows entire repository.
    * @example 'master'
+   * @default - Allows entire repository
    */
-  readonly githubBranch: string;
+  readonly githubBranch?: string;
 
   /**
    * AWS account IDs and names to give permissions to deploy to
@@ -64,22 +65,31 @@ export class GitHubActionsStack extends cdk.Stack {
         'At least one account must be provided in deployAccountIds or lookupAccountIds'
       );
     }
+    const github_branch_identifier = props.githubBranch
+      ? `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/heads/${props.githubBranch}`
+      : `repo:${props.githubOrg}/${props.githubRepo}:*`;
 
-    // Format: repo:ORG/REPO:ref:refs/heads/BRANCH
-    const trusted_branch: string = `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/heads/${props.githubBranch}`;
-
-    // Create condition for the trust policy
-    const conditions: { [key: string]: unknown } = {
-      StringEquals: {
-        'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-        'token.actions.githubusercontent.com:sub': trusted_branch,
-      },
-    };
+    const conditions = props.githubBranch
+      ? {
+          StringEquals: {
+            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+            'token.actions.githubusercontent.com:sub': github_branch_identifier,
+          },
+        }
+      : {
+          StringEquals: {
+            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          },
+          StringLike: {
+            'token.actions.githubusercontent.com:sub': github_branch_identifier,
+          },
+        };
 
     // Create the IAM role for GitHub Actions
+    const branchSuffix = props.githubBranch ? `-${props.githubBranch}` : '';
     const githubActionsRole = new iam.Role(this, 'GitHubActionsRole', {
-      roleName: `${props.githubRepo}-${props.githubBranch}-github-actions-role`,
-      description: `Role for GitHub Actions to deploy ${props.githubRepo}-${props.githubBranch} CDK stacks`,
+      roleName: `${props.githubRepo}${branchSuffix}-github-actions-role`,
+      description: `Role for GitHub Actions to deploy ${props.githubRepo}${branchSuffix} CDK stacks`,
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 

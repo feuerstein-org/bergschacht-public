@@ -162,4 +162,61 @@ describe('GitHubActionsStack', () => {
       }).not.toThrow();
     }
   });
+
+  describe('when no branch is specified', () => {
+    let noBranchApp: cdk.App;
+    let noBranchOidcProvider: IOpenIdConnectProvider;
+    let noBranchStack: GitHubActionsStack;
+    let noBranchTemplate: Template;
+
+    beforeEach(() => {
+      noBranchApp = new cdk.App();
+      const oidcStack = new GitHubOIDCProviderStack(noBranchApp, 'TestOIDCProviderNoBranch');
+      noBranchOidcProvider = oidcStack.provider;
+
+      noBranchStack = new GitHubActionsStack(noBranchApp, 'TestGitHubActionsNoBranch', {
+        githubOrg: 'feuerstein-org',
+        githubRepo: 'bergschacht',
+        githubOidcProvider: noBranchOidcProvider,
+        deployAccountIds: [['111111111111', 'Dev']],
+      });
+      noBranchTemplate = Template.fromStack(noBranchStack);
+    });
+
+    test('IAM role has correct trust policy allowing entire repository', () => {
+      noBranchTemplate.hasResourceProperties('AWS::IAM::Role', {
+        AssumeRolePolicyDocument: {
+          Statement: [
+            {
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+                },
+                StringLike: {
+                  'token.actions.githubusercontent.com:sub': 'repo:feuerstein-org/bergschacht:*',
+                },
+              },
+              Effect: 'Allow',
+            },
+          ],
+        },
+      });
+    });
+
+    test('IAM role has correct permissions to assume CDK roles', () => {
+      noBranchTemplate.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: [
+            {
+              Action: 'sts:AssumeRole',
+              Effect: 'Allow',
+              Resource: 'arn:aws:iam::111111111111:role/cdk-*',
+              Sid: 'AllowAssumeDeploymentRoleInDevAccount',
+            },
+          ],
+        },
+      });
+    });
+  });
 });

@@ -12,6 +12,13 @@ const app = new cdk.App();
 // Add CDK Nag checks to all stacks
 cdk.Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
 
+// Convert allAccounts to format needed by GitHubActionsStack
+const allAccountIds: [string, string][] = [
+  [cicdAccount, 'Cicd'],
+  [prodAccount, 'Prod'],
+  [devAccount, 'Dev'],
+];
+
 // GitHub OIDC Provider Stack - creates the OIDC provider once per account
 const githubOidcProviderStack = new GitHubOIDCProviderStack(app, 'GitHubOIDCProviderCicd', {
   env: { account: cicdAccount, region: awsRegion },
@@ -22,11 +29,7 @@ new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',
   githubBranch: 'master',
-  deployAccountIds: [
-    [cicdAccount, 'Cicd'],
-    [prodAccount, 'Prod'],
-    [devAccount, 'Dev'],
-  ],
+  deployAccountIds: allAccountIds,
   githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: awsRegion },
 });
@@ -34,13 +37,8 @@ new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
 new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',
-  githubBranch: 'dev',
   deployAccountIds: [[devAccount, 'Dev']],
-  lookupAccountIds: [
-    [cicdAccount, 'Cicd'],
-    [prodAccount, 'Prod'],
-    [devAccount, 'Dev'],
-  ],
+  lookupAccountIds: allAccountIds,
   githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: awsRegion },
 });
@@ -48,13 +46,7 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
 // ReadOnly Role Stacks - later this should be used for monitoring
 // Currently just a sample deployment trusting CI/CD account
 // TODO: Delete after using real monitoring roles
-const readOnlyRoleAccounts = [
-  { name: 'Cicd', account: cicdAccount },
-  { name: 'Dev', account: devAccount },
-  { name: 'Prod', account: prodAccount },
-];
-
-readOnlyRoleAccounts.forEach(({ name, account }) => {
+allAccountIds.forEach(([account, name]) => {
   new ReadOnlyRoleStack(app, `ReadOnlyRole${name}`, {
     trustedArns: [cicdAccount],
     env: { account, region: awsRegion },
