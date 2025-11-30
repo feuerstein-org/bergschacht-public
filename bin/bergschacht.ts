@@ -2,10 +2,11 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { AwsSolutionsChecks } from 'cdk-nag';
 // import { Bergschacht } from '../lib/bergschacht-stack';
+import { SnsPagerDutyStack } from '../lib/sns-pager-duty';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
 import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 import { ReadOnlyRoleStack } from '../lib/readonly-role-stack';
-import { cicdAccount, devAccount, prodAccount, awsRegion } from '../lib/constants';
+import { cicdAccount, devAccount, prodAccount, awsRegion, pagerDutyEmail } from '../lib/constants';
 
 const app = new cdk.App();
 
@@ -49,6 +50,14 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
 allAccountIds.forEach(([account, name]) => {
   new ReadOnlyRoleStack(app, `ReadOnlyRole${name}`, {
     trustedArns: [cicdAccount],
+    env: { account, region: awsRegion },
+  });
+});
+
+allAccountIds.forEach(([account, name]) => {
+  new SnsPagerDutyStack(app, `SnsPagerDutyStack${name}`, {
+    topicName: `PagerDutyAlerts${name}`,
+    emailAddress: pagerDutyEmail,
     env: { account, region: awsRegion },
   });
 });

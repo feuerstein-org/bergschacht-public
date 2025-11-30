@@ -1,5 +1,5 @@
 /**
- * AWS Account IDs and Region Configuration
+ * AWS Account IDs, Region Configuration and other constants
  * These are loaded from environment - via GitHub variables
  */
 
@@ -16,3 +16,4 @@ export const cicdAccount = getRequiredEnv('CICD_ACCOUNT_ID');
 export const devAccount = getRequiredEnv('DEV_ACCOUNT_ID');
 export const prodAccount = getRequiredEnv('PROD_ACCOUNT_ID');
 export const awsRegion = process.env.AWS_REGION || 'us-east-1';
+export const pagerDutyEmail = getRequiredEnv('PAGERDUTY_EMAIL');
