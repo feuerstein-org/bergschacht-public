@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import { AwsSolutionsChecks } from 'cdk-nag';
 // import { Bergschacht } from '../lib/bergschacht-stack';
 import { SnsPagerDutyStack } from '../lib/sns-pager-duty';
+import { EcrStack } from '../lib/ecr-stack';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
 import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 import { ReadOnlyRoleStack } from '../lib/readonly-role-stack';
@@ -44,22 +45,37 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   env: { account: cicdAccount, region: awsRegion },
 });
 
-// ReadOnly Role Stacks - later this should be used for monitoring
-// Currently just a sample deployment trusting CI/CD account
-// TODO: Delete after using real monitoring roles
+// Per-account infrastructure stacks
+interface AccountStacks {
+  readOnlyRole: ReadOnlyRoleStack;
+  snsPagerDuty: SnsPagerDutyStack;
+}
+
+const accountStacks = new Map<string, AccountStacks>();
+
 allAccountIds.forEach(([account, name]) => {
-  new ReadOnlyRoleStack(app, `ReadOnlyRole${name}`, {
+  // ReadOnly Role Stacks - later this should be used for monitoring
+  // Currently just a sample deployment trusting CI/CD account
+  // TODO: Delete after using real monitoring roles
+  const readOnlyRole = new ReadOnlyRoleStack(app, `ReadOnlyRole${name}`, {
     trustedArns: [cicdAccount],
     env: { account, region: awsRegion },
   });
-});
 
-allAccountIds.forEach(([account, name]) => {
-  new SnsPagerDutyStack(app, `SnsPagerDutyStack${name}`, {
+  const snsPagerDuty = new SnsPagerDutyStack(app, `SnsPagerDutyStack${name}`, {
     topicName: `PagerDutyAlerts${name}`,
     emailAddress: pagerDutyEmail,
     env: { account, region: awsRegion },
   });
+
+  accountStacks.set(name, { readOnlyRole, snsPagerDuty });
+});
+
+// Deploy central ECR Stack in CI/CD account
+new EcrStack(app, `EcrStackCicd`, {
+  repositoryName: `feuerstein`,
+  notificationTopic: accountStacks.get('Cicd')!.snsPagerDuty.topic,
+  env: { account: cicdAccount, region: awsRegion },
 });
 
 // Sample application stack for Development

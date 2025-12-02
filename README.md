@@ -73,11 +73,13 @@ Deployments are controlled through GitHub Actions OIDC stacks that enforce branc
 - **`master` branch** → deploys to Dev, Prod and CI/CD accounts
 - **Pull requests** → deploy to Dev account only (if tests and pre-commit checks pass)
 
-This means the branches specified here will have permissions to assume an OIDC role and make a deployment to the specified accounts.
+This means the branches specified here will have permissions to assume an OIDC role and make a deployment to the specified accounts. GitHub Actions will deploy stacks to the specific accounts based on their postfix: `*Cicd`, `*Dev` or `*Prod`. If a stack doesn't have a postfix it wont be deployed.
 
-**Important**: Any push to a branch with a pull request opn will trigger a deployment to the Dev account, provided that the tests and pre-commit checks pass successfully.
+**Important**: Any push to a branch with a pull request open will trigger a deployment to the Dev account, provided that the tests and pre-commit checks pass successfully.
 
-This means that no changes from unapproved branches will go to production accounts while at the same time branches besides `master` can deploy to dev accounts without hassle, e.g. no 2PR etc. This has the potential of causing issues later where different branches deploy changes to the dev account and break something. In that case we would need to either create more accounts for testing or deploy to the dev account only through a specific `dev` branch.
+Deployments to CI/CD and Prod will only happen from the `master` branch. This means that no changes from unapproved branches will go to production accounts while at the same time branches besides `master` can deploy to dev accounts without hassle, e.g. no 2PR etc.
+
+This has the potential of causing issues later where different branches deploy changes to the dev account and break each other. In that case we would need to either create more accounts for testing or deploy to the dev account only through a specific `dev` branch.
 
 If you need to add a new account, branch or new branch-to-account mapping, see below.
 
