@@ -23,9 +23,23 @@ describe('SnsPagerDutyStack', () => {
     });
   });
 
-  test('SNS topic enforces SSL', () => {
-    template.hasResourceProperties('AWS::SNS::Topic', {
-      TopicName: 'TestPagerDutyAlerts',
+  test('enforces SSL on SNS topic', () => {
+    template.hasResourceProperties('AWS::SNS::TopicPolicy', {
+      PolicyDocument: {
+        Statement: [
+          {
+            Action: 'sns:Publish',
+            Condition: {
+              Bool: {
+                'aws:SecureTransport': 'false',
+              },
+            },
+            Effect: 'Deny',
+            Principal: '*',
+            Sid: 'AllowPublishThroughSSLOnly',
+          },
+        ],
+      },
     });
   });
 
