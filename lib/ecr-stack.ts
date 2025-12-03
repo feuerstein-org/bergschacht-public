@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as sns from 'aws-cdk-lib/aws-sns';
@@ -16,6 +17,11 @@ export interface EcrStackProps extends cdk.StackProps {
    * @default - No notifications sent
    */
   readonly notificationTopic?: sns.ITopic;
+  /**
+   * List of AWS account IDs that should be allowed to pull images from this repository
+   * @default - No cross-account access granted
+   */
+  readonly allowedPullAccountIds?: string[];
 }
 
 /**
@@ -41,6 +47,13 @@ export class EcrStack extends cdk.Stack {
       ],
     });
 
+    // Grant cross-account pull permissions if specified
+    if (props.allowedPullAccountIds && props.allowedPullAccountIds.length > 0) {
+      props.allowedPullAccountIds.forEach((accountId) => {
+        this.repository.grantPull(new iam.AccountPrincipal(accountId));
+      });
+    }
+
     new cdk.CfnOutput(this, 'RepositoryUri', {
       value: this.repository.repositoryUri,
       description: 'ECR Repository URI',
@@ -62,7 +75,7 @@ export class EcrStack extends cdk.Stack {
             'repository-name': [props.repositoryName],
             'scan-status': ['COMPLETE'],
             'finding-severity-counts': {
-              $or: [{ CRITICAL: [{ exists: true }] }, { MEDIUM: [{ exists: true }] }],
+              $or: [{ CRITICAL: [{ exists: true }] }, { HIGH: [{ exists: true }] }],
             },
           },
         },

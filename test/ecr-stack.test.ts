@@ -4,19 +4,19 @@ import { Template, Match } from 'aws-cdk-lib/assertions';
 import { EcrStack } from '../lib/ecr-stack';
 
 describe('EcrStack', () => {
-  let app: cdk.App;
   let stack: EcrStack;
   let template: Template;
 
   beforeEach(() => {
-    app = new cdk.App();
+    const app = new cdk.App();
     stack = new EcrStack(app, 'TestEcr', {
       repositoryName: 'test-repository',
     });
     template = Template.fromStack(stack);
   });
 
-  test('creates ECR repository with correct name', () => {
+  test('creates ECR repository with correct name and properties', () => {
+    template.resourceCountIs('AWS::ECR::Repository', 1);
     template.hasResourceProperties('AWS::ECR::Repository', {
       RepositoryName: 'test-repository',
       ImageTagMutability: 'IMMUTABLE',
@@ -33,6 +33,12 @@ describe('EcrStack', () => {
     template.resourceCountIs('AWS::Events::Rule', 0);
   });
 
+  test('does not create policy if no cross-account pull permissions are specified', () => {
+    template.hasResourceProperties('AWS::ECR::Repository', {
+      RepositoryPolicyText: Match.absent(),
+    });
+  });
+
   test('creates CloudFormation outputs', () => {
     template.hasOutput('RepositoryUri', {
       Description: 'ECR Repository URI',
@@ -47,15 +53,62 @@ describe('EcrStack', () => {
     expect(stack.repository).toBeDefined();
   });
 
+  describe('with cross-account pull permissions', () => {
+    let templateWithCrossAccount: Template;
+
+    beforeEach(() => {
+      const app = new cdk.App();
+      const stack = new EcrStack(app, 'TestEcrCrossAccount', {
+        repositoryName: 'test-repository',
+        allowedPullAccountIds: ['11111111111', '222222222222'],
+      });
+      templateWithCrossAccount = Template.fromStack(stack);
+    });
+
+    test('creates repository policy with cross-account pull permissions for specified accounts', () => {
+      templateWithCrossAccount.hasResourceProperties('AWS::ECR::Repository', {
+        RepositoryPolicyText: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Effect: 'Allow',
+              Action: [
+                'ecr:BatchCheckLayerAvailability',
+                'ecr:GetDownloadUrlForLayer',
+                'ecr:BatchGetImage',
+              ],
+              Principal: {
+                AWS: {
+                  'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':iam::11111111111:root']],
+                },
+              },
+            }),
+            Match.objectLike({
+              Effect: 'Allow',
+              Action: [
+                'ecr:BatchCheckLayerAvailability',
+                'ecr:GetDownloadUrlForLayer',
+                'ecr:BatchGetImage',
+              ],
+              Principal: {
+                AWS: {
+                  'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':iam::222222222222:root']],
+                },
+              },
+            }),
+          ]),
+        },
+      });
+    });
+  });
+
   describe('with notification topic', () => {
     let stackWithNotifications: EcrStack;
     let templateWithNotifications: Template;
-    let topicStack: cdk.Stack;
     let topic: sns.Topic;
 
     beforeEach(() => {
       const notificationApp = new cdk.App();
-      topicStack = new cdk.Stack(notificationApp, 'Topic');
+      const topicStack = new cdk.Stack(notificationApp, 'Topic');
       topic = new sns.Topic(topicStack, 'TestTopic', {
         topicName: 'test-topic',
       });
@@ -81,7 +134,7 @@ describe('EcrStack', () => {
                   CRITICAL: [{ exists: true }],
                 },
                 {
-                  MEDIUM: [{ exists: true }],
+                  HIGH: [{ exists: true }],
                 },
               ],
             },

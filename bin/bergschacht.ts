@@ -71,10 +71,11 @@ allAccountIds.forEach(([account, name]) => {
   accountStacks.set(name, { readOnlyRole, snsPagerDuty });
 });
 
-// Deploy central ECR Stack in CI/CD account
+// Deploy central ECR Stack in CI/CD account and give pull access to Prod and Dev accounts
 new EcrStack(app, `EcrStackCicd`, {
   repositoryName: `feuerstein`,
   notificationTopic: accountStacks.get('Cicd')!.snsPagerDuty.topic,
+  allowedPullAccountIds: [devAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
 });
 
