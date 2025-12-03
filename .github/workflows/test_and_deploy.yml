@@ -23,6 +23,9 @@ env:
   DEV_ACCOUNT_ID: ${{ vars.DEV_ACCOUNT_ID }}
   PROD_ACCOUNT_ID: ${{ vars.PROD_ACCOUNT_ID }}
   AWS_REGION: ${{ vars.AWS_REGION }}
+  PAGERDUTY_EMAIL: ${{ vars.PAGERDUTY_EMAIL }}
+  ECR_REPOSITORY_NAME: ${{ vars.ECR_REPOSITORY_NAME }}
+  MISE_OVERRIDE_CONFIG_FILENAMES: 'mise.ci.toml'
 
 jobs:
   pre-commit:
@@ -34,10 +37,10 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: mise run install
+        run: mise run install-ci
 
       - name: Pre-commit
-        run: mise run pre-commit
+        run: mise run pre-commit-ci
 
   test:
     runs-on: ubuntu-latest
@@ -48,7 +51,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: mise run install
+        run: mise run install-ci
 
       - name: Set AWS role name
         run: |
@@ -66,7 +69,10 @@ jobs:
           role-session-name: GitHubActions-Test-${{ github.run_id }}
 
       - name: Build
-        run: mise run build
+        run: mise run build-ci
+
+      - name: Test
+        run: mise run test-ci
 
       - name: Diff CDK
         run: mise run diff-ci
@@ -81,7 +87,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: mise run install
+        run: mise run install-ci
 
       # If it's any other branch than master we assume the role without branch name, it only allows to deploy to Dev
       - name: Set AWS role name
@@ -100,16 +106,16 @@ jobs:
           role-session-name: GitHubActions-Deploy-${{ github.run_id }}
 
       - name: Build
-        run: mise run build
+        run: mise run build-ci
 
       - name: CDK Deploy to CI/CD
         if: github.ref == 'refs/heads/master'
-        run: mise run deploy *Cicd --require-approval never
+        run: mise run deploy-ci *Cicd --require-approval never
 
       # Always deploy to Dev from any branch
       - name: CDK Deploy to Dev
-        run: mise run deploy *Dev --require-approval never
+        run: mise run deploy-ci *Dev --require-approval never
 
       - name: CDK Deploy to Production
         if: github.ref == 'refs/heads/master'
-        run: mise run deploy *Prod --require-approval never
+        run: mise run deploy-ci *Prod --require-approval never

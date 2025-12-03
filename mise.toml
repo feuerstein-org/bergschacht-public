@@ -7,7 +7,6 @@ node = "24"
 CICD_ACCOUNT_ID = "111111111111"
 DEV_ACCOUNT_ID = "222222222222"
 PROD_ACCOUNT_ID = "444444444444"
-CICD_REGION = "us-west-2"
 PAGERDUTY_EMAIL = "alerts@example.invalid"
 ECR_REPOSITORY_NAME = "feuerstein"
 
@@ -46,10 +45,7 @@ description = "Build & see diff for all stacks, pass a stack name to filter"
 depends = ["build"]
 run = "pnpm run cdk diff"
 
-[tasks.diff-ci]
-description = "Don't build & see diff for all stacks, pass a stack name to filter"
-run = "pnpm run cdk diff"
-
 [tasks.deploy]
 description = "Deploy Stack(s), pass args (stacks) as needed, package is built before deployment"
+depends = ["build"]
 run = "pnpm run cdk deploy"

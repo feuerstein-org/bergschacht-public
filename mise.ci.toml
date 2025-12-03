@@ -1,0 +1,31 @@
+# These tasks should only be used by GH actions
+# The idea is that we don't clutter mise's autocomplete
+
+[tools]
+pnpm = "latest"
+pre-commit = "latest"
+node = "24"
+
+[tasks.install-ci]
+description = "Install dependencies for CI"
+run = "pnpm install"
+
+[tasks.pre-commit-ci]
+description = "Run pre-commit hooks (CI only)"
+run = "pre-commit run --all-files"
+
+[tasks.build-ci]
+description = "Build for CI"
+run = "pnpm run build"
+
+[tasks.diff-ci]
+description = "See diff for all stacks, pass a stack name to filter"
+run = "pnpm run cdk diff"
+
+[tasks.test-ci]
+description = "Run test-suite"
+run = "pnpm run test"
+
+[tasks.deploy-ci]
+description = "Deploy Stack(s), pass args (stacks) as needed"
+run = "pnpm run cdk deploy"
