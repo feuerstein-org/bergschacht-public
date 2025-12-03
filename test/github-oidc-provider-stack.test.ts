@@ -3,12 +3,11 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 
 describe('GitHubOIDCProviderStack', () => {
-  let app: cdk.App;
   let stack: GitHubOIDCProviderStack;
   let template: Template;
 
   beforeEach(() => {
-    app = new cdk.App();
+    const app = new cdk.App();
     stack = new GitHubOIDCProviderStack(app, 'TestGitHubOIDCProvider');
     template = Template.fromStack(stack);
   });

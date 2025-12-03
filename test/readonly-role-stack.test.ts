@@ -3,13 +3,11 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { ReadOnlyRoleStack } from '../lib/readonly-role-stack';
 
 describe('ReadOnlyRoleStack', () => {
-  let app: cdk.App;
-  let stack: ReadOnlyRoleStack;
   let template: Template;
 
   beforeEach(() => {
-    app = new cdk.App();
-    stack = new ReadOnlyRoleStack(app, 'TestReadOnlyRole', {
+    const app = new cdk.App();
+    const stack = new ReadOnlyRoleStack(app, 'TestReadOnlyRole', {
       trustedArns: ['arn:aws:iam::111111111111:root', 'arn:aws:iam::222222222222:user/SomeUser'],
     });
     template = Template.fromStack(stack);

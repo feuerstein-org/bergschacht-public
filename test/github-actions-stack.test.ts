@@ -7,7 +7,6 @@ import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 describe('GitHubActionsStack', () => {
   let app: cdk.App;
   let oidcProvider: IOpenIdConnectProvider;
-  let stack: GitHubActionsStack;
   let template: Template;
 
   beforeEach(() => {
@@ -15,7 +14,7 @@ describe('GitHubActionsStack', () => {
     const oidcStack = new GitHubOIDCProviderStack(app, 'TestOIDCProvider');
     oidcProvider = oidcStack.provider;
 
-    stack = new GitHubActionsStack(app, 'TestGitHubActions', {
+    const stack = new GitHubActionsStack(app, 'TestGitHubActions', {
       githubOrg: 'feuerstein-org',
       githubRepo: 'bergschacht',
       githubBranch: 'master',

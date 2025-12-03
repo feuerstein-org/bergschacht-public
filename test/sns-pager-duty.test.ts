@@ -3,13 +3,11 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { SnsPagerDutyStack } from '../lib/sns-pager-duty';
 
 describe('SnsPagerDutyStack', () => {
-  let app: cdk.App;
-  let stack: SnsPagerDutyStack;
   let template: Template;
 
   beforeEach(() => {
-    app = new cdk.App();
-    stack = new SnsPagerDutyStack(app, 'TestSnsPagerDuty', {
+    const app = new cdk.App();
+    const stack = new SnsPagerDutyStack(app, 'TestSnsPagerDuty', {
       topicName: 'TestPagerDutyAlerts',
       emailAddress: 'test-alerts@example.com',
     });
