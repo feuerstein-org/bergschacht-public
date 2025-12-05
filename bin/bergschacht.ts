@@ -31,7 +31,7 @@ const githubOidcProviderStack = new GitHubOIDCProviderStack(app, 'GitHubOIDCProv
 new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',
-  githubBranch: 'master',
+  githubEnvironment: 'prod',
   deployAccountIds: allAccountIds,
   githubOidcProvider: githubOidcProviderStack.provider,
   env: { account: cicdAccount, region: awsRegion },
@@ -40,6 +40,7 @@ new GitHubActionsStack(app, 'GitHubActionsProdCicd', {
 new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergschacht',
+  githubEnvironment: 'dev',
   deployAccountIds: [[devAccount, 'Dev']],
   lookupAccountIds: allAccountIds,
   githubOidcProvider: githubOidcProviderStack.provider,
@@ -49,7 +50,7 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
 new GitHubActionsStack(app, 'BergtalzugGitHubActionsEcrPushCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergtalzug',
-  githubTag: 'v*',
+  githubEnvironment: 'prod',
   githubOidcProvider: githubOidcProviderStack.provider,
   additionalPolicies: [
     new iam.PolicyStatement({

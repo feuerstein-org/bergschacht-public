@@ -1,6 +1,6 @@
 # Bergschacht
 
-This repo deploys all of Feuersteins CDK infrastructure. The deployments are configured in such a way that specific branches are only allowed to push to specific accounts. For example the `dev` branch can only deploy to the dev account but the `master` branch can deploy to both dev and prod accounts.
+This repo deploys all of Feuersteins CDK infrastructure. The deployments are configured using GitHub environments to control which accounts can be deployed to. For example the `dev` environment can only deploy to the dev account but the `prod` environment can deploy to dev, prod, and CI/CD accounts.
 
 ## Getting started
 
@@ -61,27 +61,29 @@ To see all available `mise` tasks run `mise run`.
 ## Project Structure
 
 - `lib/github-oidc-provider-stack.ts` - GitHub OIDC provider stack to CI/CD account
-- `lib/github-actions-stack.ts` - GitHub Actions IAM role stack also deployed to CI/CD account - allows deployment into Prod & Dev accounts
+- `lib/github-actions-stack.ts` - GitHub Actions IAM role stack also deployed to CI/CD account - allows deployment into Prod & Dev accounts based on GitHub environments
 - `lib/readonly-role-stack.ts` - ReadOnly IAM role stack deployed to each account for monitoring and inspection
 - `lib/constants.ts` - Account mapping and other constants
-- `bin/bergschacht.ts` - CDK app entry point with branch to account mapping
+- `bin/bergschacht.ts` - CDK app entry point with environment to account mapping
 
 ## Deployment Model
 
-Deployments are controlled through GitHub Actions OIDC stacks that enforce branch-to-account permissions:
+Deployments are controlled through GitHub Actions OIDC stacks that enforce environment-to-account permissions using [GitHub Environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment):
 
-- **`master` branch** → deploys to Dev, Prod and CI/CD accounts
-- **Pull requests** → deploy to Dev account only (if tests and pre-commit checks pass)
+- **`prod` environment** → deploys to Dev, Prod and CI/CD accounts (only from `master` branch)
+- **`dev` environment** → deploys to Dev account only (from any branch or pull request)
 
-This means the branches specified here will have permissions to assume an OIDC role and make a deployment to the specified accounts. GitHub Actions will deploy stacks to the specific accounts based on their postfix: `*Cicd`, `*Dev` or `*Prod`. If a stack doesn't have a postfix it wont be deployed.
+The IAM trust policy uses the GitHub environment claim format: `repo:<org>/<repo>:environment:<environment-name>`.
 
-**Important**: Any push to a branch with a pull request open will trigger a deployment to the Dev account, provided that the tests and pre-commit checks pass successfully.
+GitHub Actions will deploy stacks to specific accounts based on their postfix: `*Cicd`, `*Dev` or `*Prod`. If a stack doesn't have a postfix it won't be deployed.
 
-Deployments to CI/CD and Prod will only happen from the `master` branch. This means that no changes from unapproved branches will go to production accounts while at the same time branches besides `master` can deploy to dev accounts without hassle, e.g. no 2PR etc.
+**Important**: Any push to a branch with a pull request open will trigger a deployment to the Dev account using the `dev` environment, provided that the tests and pre-commit checks pass successfully.
+
+Deployments to CI/CD and Prod will only happen from the `master` branch using the `prod` environment. This means that no changes from unapproved branches will go to production accounts while at the same time any branch can deploy to dev accounts without hassle, e.g. no 2PR etc.
 
 This has the potential of causing issues later where different branches deploy changes to the dev account and break each other. In that case we would need to either create more accounts for testing or deploy to the dev account only through a specific `dev` branch.
 
-If you need to add a new account, branch or new branch-to-account mapping, see below.
+If you need to add a new account or environment mapping, see below.
 
 ## Stacks
 
@@ -89,17 +91,24 @@ If you need to add a new account, branch or new branch-to-account mapping, see b
 
 This stack creates the GitHub OIDC provider in the CI/CD account:
 
-This needs to be deployed only once to the CI/CD account, then `GitHubActionsStack` instances deploy roles that allow GitHub actions to assume roles and deploy to other accoutns. The OIDC provider is then shared across all GitHub Actions roles in that account.
+This needs to be deployed only once to the CI/CD account, then `GitHubActionsStack` instances deploy roles that allow GitHub actions to assume roles and deploy to other accounts. The OIDC provider is then shared across all GitHub Actions roles in that account.
 
 ### GitHubActions
 
 This stack sets up GitHub Actions to deploy CDK stacks using OIDC:
 
 - Creates IAM roles that trust the GitHub OIDC provider
-- Configures trust policies to restrict access to specific GitHub repositories and branches
+- Configures trust policies to restrict access to specific GitHub repositories and environments
 - Configures necessary permissions for CDK deployments in other accounts
 
-Any time a new account requires deployments or a new branch needs to be deployed use this stack.
+The stack uses the `githubEnvironment` property to specify which GitHub environment can assume the role. For example:
+
+- `githubEnvironment: 'prod'` creates a role that can only be assumed from the `prod` environment
+- `githubEnvironment: 'dev'` creates a role that can only be assumed from the `dev` environment
+
+You can also attach custom IAM permissions using the `additionalPolicies` property. This is useful for granting specific permissions like ECR push access without needing deployment permissions to other accounts.
+
+Any time a new account requires deployments or a new environment needs access, use this stack.
 
 If you are adding a new account run `cdk bootstrap --trust <cicd-account-id> --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess` to bootstrap the new account while allowing the CI/CD account to access it.
 

@@ -44,6 +44,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    environment: dev
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -53,19 +54,11 @@ jobs:
       - name: Install dependencies
         run: mise run install-ci
 
-      - name: Set AWS role name
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ROLE_NAME=${{ github.event.repository.name }}-github-actions-role" >> $GITHUB_ENV
-          else
-            echo "ROLE_NAME=${{ github.event.repository.name }}-${{ github.ref_name }}-github-actions-role" >> $GITHUB_ENV
-          fi
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Test-${{ github.run_id }}
 
       - name: Build
@@ -77,9 +70,10 @@ jobs:
       - name: Diff CDK
         run: mise run diff-ci
 
-  deploy:
+  deploy-dev:
     runs-on: ubuntu-latest
     needs: [pre-commit, test]
+    environment: dev
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -89,33 +83,45 @@ jobs:
       - name: Install dependencies
         run: mise run install-ci
 
-      # If it's any other branch than master we assume the role without branch name, it only allows to deploy to Dev
-      - name: Set AWS role name
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ROLE_NAME=${{ github.event.repository.name }}-github-actions-role" >> $GITHUB_ENV
-          else
-            echo "ROLE_NAME=${{ github.event.repository.name }}-${{ github.ref_name }}-github-actions-role" >> $GITHUB_ENV
-          fi
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy-Dev-${{ github.run_id }}
+
+      - name: Build
+        run: mise run build-ci
+
+      - name: CDK Deploy to Dev
+        run: mise run deploy-ci *Dev --require-approval never
+
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: [pre-commit, test]
+    if: github.ref == 'refs/heads/master'
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: mise run install-ci
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: GitHubActions-Deploy-${{ github.run_id }}
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-prod-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy-Prod-${{ github.run_id }}
 
       - name: Build
         run: mise run build-ci
 
       - name: CDK Deploy to CI/CD
-        if: github.ref == 'refs/heads/master'
         run: mise run deploy-ci *Cicd --require-approval never
 
-      # Always deploy to Dev from any branch
-      - name: CDK Deploy to Dev
-        run: mise run deploy-ci *Dev --require-approval never
-
       - name: CDK Deploy to Production
-        if: github.ref == 'refs/heads/master'
         run: mise run deploy-ci *Prod --require-approval never

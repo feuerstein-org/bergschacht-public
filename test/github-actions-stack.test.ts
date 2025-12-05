@@ -18,7 +18,7 @@ describe('GitHubActionsStack', () => {
     const stack = new GitHubActionsStack(app, 'TestGitHubActions', {
       githubOrg: 'feuerstein-org',
       githubRepo: 'bergschacht',
-      githubBranch: 'master',
+      githubEnvironment: 'prod',
       githubOidcProvider: oidcProvider,
       deployAccountIds: [
         ['111111111111', 'Dev'],
@@ -35,12 +35,11 @@ describe('GitHubActionsStack', () => {
 
   test('creates IAM role with correct name', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'bergschacht-master-github-actions-role',
-      Description: 'Role for GitHub Actions to deploy bergschacht-master CDK stacks',
+      RoleName: 'feuerstein-org-bergschacht-prod-github-actions-role',
     });
   });
 
-  test('IAM role has correct trust policy for GitHub', () => {
+  test('IAM role has correct trust policy for GitHub environment', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
       AssumeRolePolicyDocument: {
         Statement: [
@@ -50,7 +49,7 @@ describe('GitHubActionsStack', () => {
               StringEquals: {
                 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
                 'token.actions.githubusercontent.com:sub':
-                  'repo:feuerstein-org/bergschacht:ref:refs/heads/master',
+                  'repo:feuerstein-org/bergschacht:environment:prod',
               },
             },
             Effect: 'Allow',
@@ -144,7 +143,7 @@ describe('GitHubActionsStack', () => {
         new GitHubActionsStack(app, 'Invalid', {
           githubOrg: 'feuerstein-org',
           githubRepo: 'bergschacht',
-          githubBranch: 'master',
+          githubEnvironment: 'prod',
           githubOidcProvider: oidcProvider,
           ...accountProps,
         });
@@ -155,69 +154,12 @@ describe('GitHubActionsStack', () => {
         new GitHubActionsStack(app, 'Invalid', {
           githubOrg: 'feuerstein-org',
           githubRepo: 'bergschacht',
-          githubBranch: 'master',
+          githubEnvironment: 'prod',
           githubOidcProvider: oidcProvider,
           ...accountProps,
         });
       }).not.toThrow();
     }
-  });
-
-  describe('when no branch is specified', () => {
-    let noBranchApp: cdk.App;
-    let noBranchOidcProvider: IOpenIdConnectProvider;
-    let noBranchStack: GitHubActionsStack;
-    let noBranchTemplate: Template;
-
-    beforeEach(() => {
-      noBranchApp = new cdk.App();
-      const oidcStack = new GitHubOIDCProviderStack(noBranchApp, 'TestOIDCProviderNoBranch');
-      noBranchOidcProvider = oidcStack.provider;
-
-      noBranchStack = new GitHubActionsStack(noBranchApp, 'TestGitHubActionsNoBranch', {
-        githubOrg: 'feuerstein-org',
-        githubRepo: 'bergschacht',
-        githubOidcProvider: noBranchOidcProvider,
-        deployAccountIds: [['111111111111', 'Dev']],
-      });
-      noBranchTemplate = Template.fromStack(noBranchStack);
-    });
-
-    test('IAM role has correct trust policy allowing entire repository', () => {
-      noBranchTemplate.hasResourceProperties('AWS::IAM::Role', {
-        AssumeRolePolicyDocument: {
-          Statement: [
-            {
-              Action: 'sts:AssumeRoleWithWebIdentity',
-              Condition: {
-                StringEquals: {
-                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-                },
-                StringLike: {
-                  'token.actions.githubusercontent.com:sub': ['repo:feuerstein-org/bergschacht:*'],
-                },
-              },
-              Effect: 'Allow',
-            },
-          ],
-        },
-      });
-    });
-
-    test('IAM role has correct permissions to assume CDK roles', () => {
-      noBranchTemplate.hasResourceProperties('AWS::IAM::Policy', {
-        PolicyDocument: {
-          Statement: [
-            {
-              Action: 'sts:AssumeRole',
-              Effect: 'Allow',
-              Resource: 'arn:aws:iam::111111111111:role/cdk-*',
-              Sid: 'AllowAssumeDeploymentRoleInDevAccount',
-            },
-          ],
-        },
-      });
-    });
   });
 
   describe('when additionalPolicies are provided', () => {
@@ -231,7 +173,7 @@ describe('GitHubActionsStack', () => {
       const stack = new GitHubActionsStack(policyApp, 'TestGitHubActionsPolicy', {
         githubOrg: 'other-org',
         githubRepo: 'other-repo',
-        githubBranch: 'master',
+        githubEnvironment: 'prod',
         githubOidcProvider: policyOidcProvider,
         additionalPolicies: [
           new iam.PolicyStatement({
@@ -260,7 +202,7 @@ describe('GitHubActionsStack', () => {
 
     test('creates IAM role with correct name', () => {
       policyTemplate.hasResourceProperties('AWS::IAM::Role', {
-        RoleName: 'other-repo-master-github-actions-role',
+        RoleName: 'other-org-other-repo-prod-github-actions-role',
       });
     });
 
@@ -286,106 +228,6 @@ describe('GitHubActionsStack', () => {
               Effect: 'Allow',
               Resource: 'arn:aws:ecr:us-east-1:123456789012:repository/my-repo',
               Sid: 'AllowEcrPush',
-            },
-          ],
-        },
-      });
-    });
-  });
-
-  describe('when githubTag is specified', () => {
-    let tagTemplate: Template;
-
-    beforeEach(() => {
-      const tagApp = new cdk.App();
-      const oidcStack = new GitHubOIDCProviderStack(tagApp, 'TestOIDCProviderTag');
-      const tagOidcProvider = oidcStack.provider;
-
-      const stack = new GitHubActionsStack(tagApp, 'TestGitHubActionsTag', {
-        githubOrg: 'feuerstein-org',
-        githubRepo: 'bergschacht',
-        githubTag: 'v*',
-        githubOidcProvider: tagOidcProvider,
-        deployAccountIds: [['111111111111', 'Dev']],
-      });
-      tagTemplate = Template.fromStack(stack);
-    });
-
-    test('IAM role has correct name with tag suffix', () => {
-      tagTemplate.hasResourceProperties('AWS::IAM::Role', {
-        RoleName: 'bergschacht-tag-vx-github-actions-role',
-      });
-    });
-
-    test('IAM role has correct trust policy for tag pattern', () => {
-      tagTemplate.hasResourceProperties('AWS::IAM::Role', {
-        AssumeRolePolicyDocument: {
-          Statement: [
-            {
-              Action: 'sts:AssumeRoleWithWebIdentity',
-              Condition: {
-                StringEquals: {
-                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-                },
-                StringLike: {
-                  'token.actions.githubusercontent.com:sub': [
-                    'repo:feuerstein-org/bergschacht:ref:refs/tags/v*',
-                  ],
-                },
-              },
-              Effect: 'Allow',
-            },
-          ],
-        },
-      });
-    });
-  });
-
-  describe('when both githubBranch and githubTag are specified', () => {
-    let bothApp: cdk.App;
-    let bothOidcProvider: IOpenIdConnectProvider;
-    let bothTemplate: Template;
-
-    beforeEach(() => {
-      bothApp = new cdk.App();
-      const oidcStack = new GitHubOIDCProviderStack(bothApp, 'TestOIDCProviderBoth');
-      bothOidcProvider = oidcStack.provider;
-
-      const stack = new GitHubActionsStack(bothApp, 'TestGitHubActionsBoth', {
-        githubOrg: 'feuerstein-org',
-        githubRepo: 'bergschacht',
-        githubBranch: 'master',
-        githubTag: 'v*',
-        githubOidcProvider: bothOidcProvider,
-        deployAccountIds: [['111111111111', 'Dev']],
-      });
-      bothTemplate = Template.fromStack(stack);
-    });
-
-    test('IAM role has correct name with both branch and tag suffix', () => {
-      bothTemplate.hasResourceProperties('AWS::IAM::Role', {
-        RoleName: 'bergschacht-master-tag-vx-github-actions-role',
-      });
-    });
-
-    test('IAM role has correct trust policy allowing both branch and tag', () => {
-      bothTemplate.hasResourceProperties('AWS::IAM::Role', {
-        AssumeRolePolicyDocument: {
-          Statement: [
-            {
-              Action: 'sts:AssumeRoleWithWebIdentity',
-              Condition: {
-                StringEquals: {
-                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-                },
-                StringLike: {
-                  'token.actions.githubusercontent.com:sub': [
-                    'repo:feuerstein-org/bergschacht:ref:refs/heads/master',
-                    'repo:feuerstein-org/bergschacht:ref:refs/tags/v*',
-                  ],
-                },
-              },
-              Effect: 'Allow',
             },
           ],
         },
