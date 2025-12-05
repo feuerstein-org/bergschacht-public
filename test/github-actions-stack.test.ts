@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { IOpenIdConnectProvider } from 'aws-cdk-lib/aws-iam';
 import { Template } from 'aws-cdk-lib/assertions';
 import { GitHubActionsStack } from '../lib/github-actions-stack';
@@ -125,7 +126,7 @@ describe('GitHubActionsStack', () => {
     [
       'no account IDs provided',
       {},
-      'At least one account must be provided in deployAccountIds or lookupAccountIds',
+      'At least one account must be provided in deployAccountIds or lookupAccountIds, or additionalPolicies must be provided',
     ],
     [
       'empty deploy account ID provided',
@@ -212,6 +213,79 @@ describe('GitHubActionsStack', () => {
               Effect: 'Allow',
               Resource: 'arn:aws:iam::111111111111:role/cdk-*',
               Sid: 'AllowAssumeDeploymentRoleInDevAccount',
+            },
+          ],
+        },
+      });
+    });
+  });
+
+  describe('when additionalPolicies are provided', () => {
+    let policyTemplate: Template;
+
+    beforeEach(() => {
+      const policyApp = new cdk.App();
+      const oidcStack = new GitHubOIDCProviderStack(policyApp, 'TestOIDCProviderPolicy');
+      const policyOidcProvider = oidcStack.provider;
+
+      const stack = new GitHubActionsStack(policyApp, 'TestGitHubActionsPolicy', {
+        githubOrg: 'other-org',
+        githubRepo: 'other-repo',
+        githubBranch: 'master',
+        githubOidcProvider: policyOidcProvider,
+        additionalPolicies: [
+          new iam.PolicyStatement({
+            sid: 'AllowEcrAuth',
+            effect: iam.Effect.ALLOW,
+            actions: ['ecr:GetAuthorizationToken'],
+            resources: ['*'],
+          }),
+          new iam.PolicyStatement({
+            sid: 'AllowEcrPush',
+            effect: iam.Effect.ALLOW,
+            actions: [
+              'ecr:BatchCheckLayerAvailability',
+              'ecr:PutImage',
+              'ecr:InitiateLayerUpload',
+              'ecr:UploadLayerPart',
+              'ecr:CompleteLayerUpload',
+              'ecr:GetDownloadUrlForLayer',
+            ],
+            resources: ['arn:aws:ecr:us-east-1:123456789012:repository/my-repo'],
+          }),
+        ],
+      });
+      policyTemplate = Template.fromStack(stack);
+    });
+
+    test('creates IAM role with correct name', () => {
+      policyTemplate.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'other-repo-master-github-actions-role',
+      });
+    });
+
+    test('IAM role has additional policy statements', () => {
+      policyTemplate.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: [
+            {
+              Action: 'ecr:GetAuthorizationToken',
+              Effect: 'Allow',
+              Resource: '*',
+              Sid: 'AllowEcrAuth',
+            },
+            {
+              Action: [
+                'ecr:BatchCheckLayerAvailability',
+                'ecr:PutImage',
+                'ecr:InitiateLayerUpload',
+                'ecr:UploadLayerPart',
+                'ecr:CompleteLayerUpload',
+                'ecr:GetDownloadUrlForLayer',
+              ],
+              Effect: 'Allow',
+              Resource: 'arn:aws:ecr:us-east-1:123456789012:repository/my-repo',
+              Sid: 'AllowEcrPush',
             },
           ],
         },

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib/core';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { AwsSolutionsChecks } from 'cdk-nag';
 // import { Bergschacht } from '../lib/bergschacht-stack';
 import { SnsPagerDutyStack } from '../lib/sns-pager-duty';
@@ -42,6 +43,36 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   deployAccountIds: [[devAccount, 'Dev']],
   lookupAccountIds: allAccountIds,
   githubOidcProvider: githubOidcProviderStack.provider,
+  env: { account: cicdAccount, region: awsRegion },
+});
+
+new GitHubActionsStack(app, 'BergtalzugGitHubActionsEcrPushCicd', {
+  githubOrg: 'feuerstein-org',
+  githubRepo: 'bergtalzug',
+  githubBranch: 'master',
+  githubOidcProvider: githubOidcProviderStack.provider,
+  additionalPolicies: [
+    new iam.PolicyStatement({
+      sid: 'AllowEcrAuth',
+      effect: iam.Effect.ALLOW,
+      actions: ['ecr:GetAuthorizationToken'],
+      resources: ['*'], // GetAuthorizationToken doesn't support resource-level permissions
+    }),
+    new iam.PolicyStatement({
+      sid: 'AllowEcrPush',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'ecr:BatchCheckLayerAvailability',
+        'ecr:GetDownloadUrlForLayer',
+        'ecr:BatchGetImage',
+        'ecr:PutImage',
+        'ecr:InitiateLayerUpload',
+        'ecr:UploadLayerPart',
+        'ecr:CompleteLayerUpload',
+      ],
+      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/feuerstein`],
+    }),
+  ],
   env: { account: cicdAccount, region: awsRegion },
 });
 

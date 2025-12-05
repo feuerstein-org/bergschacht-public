@@ -42,6 +42,20 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
    * This should be created once in the CI/CD account using GitHubOIDCProviderStack.
    */
   readonly githubOidcProvider: iam.IOpenIdConnectProvider;
+
+  /**
+   * Additional IAM policy statements to attach to the GitHub Actions role.
+   * Use this to grant custom permissions like ECR push access.
+   * @example [
+   *   new iam.PolicyStatement({
+   *     effect: iam.Effect.ALLOW,
+   *     actions: ['ecr:PutImage', 'ecr:InitiateLayerUpload', ...],
+   *     resources: ['arn:aws:ecr:*:*:repository/my-repo'],
+   *   })
+   * ]
+   * @default - No additional permissions
+   */
+  readonly additionalPolicies?: iam.PolicyStatement[];
 }
 
 /**
@@ -59,10 +73,15 @@ export class GitHubActionsStack extends cdk.Stack {
 
     const deployAccountIds = props.deployAccountIds ?? [];
     const lookupAccountIds = props.lookupAccountIds ?? [];
+    const additionalPolicies = props.additionalPolicies ?? [];
 
-    if (deployAccountIds.length === 0 && lookupAccountIds.length === 0) {
+    if (
+      deployAccountIds.length === 0 &&
+      lookupAccountIds.length === 0 &&
+      additionalPolicies.length === 0
+    ) {
       throw new Error(
-        'At least one account must be provided in deployAccountIds or lookupAccountIds'
+        'At least one account must be provided in deployAccountIds or lookupAccountIds, or additionalPolicies must be provided'
       );
     }
     const github_branch_identifier = props.githubBranch
@@ -117,10 +136,14 @@ export class GitHubActionsStack extends cdk.Stack {
       )
     );
 
+    // Apply additional custom policy statements
+    additionalPolicies.forEach((policy) => githubActionsRole.addToPolicy(policy));
+
     this.role = githubActionsRole;
 
     // Suppress CDK Nag warnings for wildcard permissions in CDK role ARNs
     // These wildcards are necessary to allow GitHub Actions to assume CDK bootstrap roles
+    // and for additional policies that may contain wildcards (e.g., ECR push permissions)
     NagSuppressions.addResourceSuppressionsByPath(
       this,
       `${this.stackName}/GitHubActionsRole/DefaultPolicy/Resource`,
@@ -128,7 +151,7 @@ export class GitHubActionsStack extends cdk.Stack {
         {
           id: 'AwsSolutions-IAM5',
           reason:
-            'Wildcard permissions are required for CDK deployment roles to allow GitHub Actions to assume the appropriate bootstrap roles in target accounts.',
+            'Wildcard permissions are required for CDK deployment roles and additional policies (e.g., ECR) to allow GitHub Actions to assume the appropriate bootstrap roles in target accounts.',
         },
       ],
       true
