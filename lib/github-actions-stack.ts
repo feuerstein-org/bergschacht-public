@@ -17,11 +17,18 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
   readonly githubRepo: string;
 
   /**
-   * Restrict to specific branch. If not provided, allows entire repository.
-   * @example 'master'
-   * @default - Allows entire repository
+   * Restrict to specific branch. If not provided and no tag is specified, allows entire repository.
+   * @example 'master' or 'dev-*' for all dev branches
+   * @default - No branch restriction (uses tag if specified or entire repository)
    */
   readonly githubBranch?: string;
+
+  /**
+   * Restrict to specific tag pattern. If not provided and no branch is specified, allows entire repository.
+   * @example 'v*' for all version tags, 'dev-*' for dev tags
+   * @default - No tag restriction (uses branch or entire repository)
+   */
+  readonly githubTag?: string;
 
   /**
    * AWS account IDs and names to give permissions to deploy to
@@ -62,8 +69,12 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
  * CDK Stack that sets up GitHub Actions OIDC authentication for AWS.
  *
  * Creates an OIDC provider and IAM role that allows GitHub Actions workflows
- * from a specific repository and branch to assume roles and deploy CDK stacks
+ * from a specific repository and branch/tag to assume roles and deploy CDK stacks
  * via the CI/CD account to specified deployment accounts.
+ *
+ * If no branch or tag is specified, the role allows access from the entire repository.
+ *
+ * Wildcards in branch or tag names are supported using StringLike conditions.
  */
 export class GitHubActionsStack extends cdk.Stack {
   public readonly role: iam.IRole;
@@ -84,15 +95,37 @@ export class GitHubActionsStack extends cdk.Stack {
         'At least one account must be provided in deployAccountIds or lookupAccountIds, or additionalPolicies must be provided'
       );
     }
-    const github_branch_identifier = props.githubBranch
-      ? `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/heads/${props.githubBranch}`
-      : `repo:${props.githubOrg}/${props.githubRepo}:*`;
+    // Build the subject identifiers for GitHub OIDC
+    // Supports: branch only, tag only, both, or entire repository
+    const subjectIdentifiers: string[] = [];
 
-    const conditions = props.githubBranch
+    if (props.githubBranch) {
+      subjectIdentifiers.push(
+        `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/heads/${props.githubBranch}`
+      );
+    }
+
+    if (props.githubTag) {
+      subjectIdentifiers.push(
+        `repo:${props.githubOrg}/${props.githubRepo}:ref:refs/tags/${props.githubTag}`
+      );
+    }
+
+    // If no specific branch or tag, allow entire repository
+    if (subjectIdentifiers.length === 0) {
+      subjectIdentifiers.push(`repo:${props.githubOrg}/${props.githubRepo}:*`);
+    }
+
+    // Determine if we need StringLike (for wildcards) or StringEquals (for exact match)
+    const needsStringLike = subjectIdentifiers.some((s) => s.includes('*'));
+    const useExactMatch = subjectIdentifiers.length === 1 && !needsStringLike;
+
+    // Build conditions based on the number of subject identifiers
+    const conditions = useExactMatch
       ? {
           StringEquals: {
             'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-            'token.actions.githubusercontent.com:sub': github_branch_identifier,
+            'token.actions.githubusercontent.com:sub': subjectIdentifiers[0],
           },
         }
       : {
@@ -100,14 +133,15 @@ export class GitHubActionsStack extends cdk.Stack {
             'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
           },
           StringLike: {
-            'token.actions.githubusercontent.com:sub': github_branch_identifier,
+            'token.actions.githubusercontent.com:sub': subjectIdentifiers,
           },
         };
 
     // Create the IAM role for GitHub Actions
     const branchSuffix = props.githubBranch ? `-${props.githubBranch}` : '';
+    const tagSuffix = props.githubTag ? `-tag-${props.githubTag.replace(/\*/g, 'x')}` : '';
     const githubActionsRole = new iam.Role(this, 'GitHubActionsRole', {
-      roleName: `${props.githubRepo}${branchSuffix}-github-actions-role`,
+      roleName: `${props.githubRepo}${branchSuffix}${tagSuffix}-github-actions-role`,
       description: `Role for GitHub Actions to deploy ${props.githubRepo}${branchSuffix} CDK stacks`,
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });

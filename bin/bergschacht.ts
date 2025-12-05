@@ -49,7 +49,7 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
 new GitHubActionsStack(app, 'BergtalzugGitHubActionsEcrPushCicd', {
   githubOrg: 'feuerstein-org',
   githubRepo: 'bergtalzug',
-  githubBranch: 'master',
+  githubTag: 'v*',
   githubOidcProvider: githubOidcProviderStack.provider,
   additionalPolicies: [
     new iam.PolicyStatement({

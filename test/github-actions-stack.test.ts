@@ -194,7 +194,7 @@ describe('GitHubActionsStack', () => {
                   'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
                 },
                 StringLike: {
-                  'token.actions.githubusercontent.com:sub': 'repo:feuerstein-org/bergschacht:*',
+                  'token.actions.githubusercontent.com:sub': ['repo:feuerstein-org/bergschacht:*'],
                 },
               },
               Effect: 'Allow',
@@ -286,6 +286,106 @@ describe('GitHubActionsStack', () => {
               Effect: 'Allow',
               Resource: 'arn:aws:ecr:us-east-1:123456789012:repository/my-repo',
               Sid: 'AllowEcrPush',
+            },
+          ],
+        },
+      });
+    });
+  });
+
+  describe('when githubTag is specified', () => {
+    let tagTemplate: Template;
+
+    beforeEach(() => {
+      const tagApp = new cdk.App();
+      const oidcStack = new GitHubOIDCProviderStack(tagApp, 'TestOIDCProviderTag');
+      const tagOidcProvider = oidcStack.provider;
+
+      const stack = new GitHubActionsStack(tagApp, 'TestGitHubActionsTag', {
+        githubOrg: 'feuerstein-org',
+        githubRepo: 'bergschacht',
+        githubTag: 'v*',
+        githubOidcProvider: tagOidcProvider,
+        deployAccountIds: [['111111111111', 'Dev']],
+      });
+      tagTemplate = Template.fromStack(stack);
+    });
+
+    test('IAM role has correct name with tag suffix', () => {
+      tagTemplate.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'bergschacht-tag-vx-github-actions-role',
+      });
+    });
+
+    test('IAM role has correct trust policy for tag pattern', () => {
+      tagTemplate.hasResourceProperties('AWS::IAM::Role', {
+        AssumeRolePolicyDocument: {
+          Statement: [
+            {
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+                },
+                StringLike: {
+                  'token.actions.githubusercontent.com:sub': [
+                    'repo:feuerstein-org/bergschacht:ref:refs/tags/v*',
+                  ],
+                },
+              },
+              Effect: 'Allow',
+            },
+          ],
+        },
+      });
+    });
+  });
+
+  describe('when both githubBranch and githubTag are specified', () => {
+    let bothApp: cdk.App;
+    let bothOidcProvider: IOpenIdConnectProvider;
+    let bothTemplate: Template;
+
+    beforeEach(() => {
+      bothApp = new cdk.App();
+      const oidcStack = new GitHubOIDCProviderStack(bothApp, 'TestOIDCProviderBoth');
+      bothOidcProvider = oidcStack.provider;
+
+      const stack = new GitHubActionsStack(bothApp, 'TestGitHubActionsBoth', {
+        githubOrg: 'feuerstein-org',
+        githubRepo: 'bergschacht',
+        githubBranch: 'master',
+        githubTag: 'v*',
+        githubOidcProvider: bothOidcProvider,
+        deployAccountIds: [['111111111111', 'Dev']],
+      });
+      bothTemplate = Template.fromStack(stack);
+    });
+
+    test('IAM role has correct name with both branch and tag suffix', () => {
+      bothTemplate.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'bergschacht-master-tag-vx-github-actions-role',
+      });
+    });
+
+    test('IAM role has correct trust policy allowing both branch and tag', () => {
+      bothTemplate.hasResourceProperties('AWS::IAM::Role', {
+        AssumeRolePolicyDocument: {
+          Statement: [
+            {
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Condition: {
+                StringEquals: {
+                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+                },
+                StringLike: {
+                  'token.actions.githubusercontent.com:sub': [
+                    'repo:feuerstein-org/bergschacht:ref:refs/heads/master',
+                    'repo:feuerstein-org/bergschacht:ref:refs/tags/v*',
+                  ],
+                },
+              },
+              Effect: 'Allow',
             },
           ],
         },
