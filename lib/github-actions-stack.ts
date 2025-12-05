@@ -96,8 +96,8 @@ export class GitHubActionsStack extends cdk.Stack {
 
     // Create the IAM role for GitHub Actions
     const githubActionsRole = new iam.Role(this, 'GitHubActionsRole', {
-      roleName: `${props.githubOrg}-${props.githubRepo}-${props.githubEnvironment}-github-actions-role`,
-      description: `Role for GitHub Actions ${props.githubOrg}-${props.githubRepo}-${props.githubEnvironment} workflows to assume for deployments`,
+      roleName: `${props.githubRepo}-${props.githubEnvironment}-github-actions-role`,
+      description: `Role for GitHub Actions ${props.githubRepo}-${props.githubEnvironment} workflows to assume for deployments`,
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 

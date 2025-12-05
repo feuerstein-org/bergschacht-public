@@ -71,7 +71,7 @@ new GitHubActionsStack(app, 'BergtalzugGitHubActionsEcrPushCicd', {
         'ecr:UploadLayerPart',
         'ecr:CompleteLayerUpload',
       ],
-      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/feuerstein`],
+      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/bergtalzug`],
     }),
   ],
   env: { account: cicdAccount, region: awsRegion },
@@ -104,8 +104,8 @@ allAccountIds.forEach(([account, name]) => {
 });
 
 // Deploy central ECR Stack in CI/CD account and give pull access to Prod and Dev accounts
-new EcrStack(app, `EcrStackCicd`, {
-  repositoryName: `feuerstein`,
+new EcrStack(app, `BergtalzugEcrStackCicd`, {
+  repositoryName: `bergtalzug`,
   notificationTopic: accountStacks.get('Cicd')!.snsPagerDuty.topic,
   allowedPullAccountIds: [devAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },

@@ -57,7 +57,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.repository_owner }}-${{ github.event.repository.name }}-dev-github-actions-role
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Test-${{ github.run_id }}
 
@@ -86,7 +86,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.repository_owner }}-${{ github.event.repository.name }}-dev-github-actions-role
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Deploy-Dev-${{ github.run_id }}
 
@@ -113,7 +113,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.repository_owner }}-${{ github.event.repository.name }}-prod-github-actions-role
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-prod-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Deploy-Prod-${{ github.run_id }}
 

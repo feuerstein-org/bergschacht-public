@@ -35,7 +35,7 @@ describe('GitHubActionsStack', () => {
 
   test('creates IAM role with correct name', () => {
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'feuerstein-org-bergschacht-prod-github-actions-role',
+      RoleName: 'bergschacht-prod-github-actions-role',
     });
   });
 
@@ -202,7 +202,7 @@ describe('GitHubActionsStack', () => {
 
     test('creates IAM role with correct name', () => {
       policyTemplate.hasResourceProperties('AWS::IAM::Role', {
-        RoleName: 'other-org-other-repo-prod-github-actions-role',
+        RoleName: 'other-repo-prod-github-actions-role',
       });
     });
 
