@@ -19,7 +19,13 @@ describe('EcrStack', () => {
     template.resourceCountIs('AWS::ECR::Repository', 1);
     template.hasResourceProperties('AWS::ECR::Repository', {
       RepositoryName: 'test-repository',
-      ImageTagMutability: 'IMMUTABLE',
+      ImageTagMutability: 'IMMUTABLE_WITH_EXCLUSION',
+      ImageTagMutabilityExclusionFilters: [
+        {
+          ImageTagMutabilityExclusionFilterType: 'WILDCARD',
+          ImageTagMutabilityExclusionFilterValue: 'latest',
+        },
+      ],
       ImageScanningConfiguration: {
         ScanOnPush: true,
       },
