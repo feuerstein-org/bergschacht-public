@@ -71,7 +71,7 @@ new GitHubActionsStack(app, 'MinenwagenGitHubActionsEcrPushCicd', {
         'ecr:UploadLayerPart',
         'ecr:CompleteLayerUpload',
       ],
-      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/feuerstein/minenwagen`],
+      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/feuerstein`],
     }),
   ],
   env: { account: cicdAccount, region: awsRegion },
