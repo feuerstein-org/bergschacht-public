@@ -37,7 +37,10 @@ export class EcrStack extends cdk.Stack {
     this.repository = new ecr.Repository(this, 'Repository', {
       repositoryName: props.repositoryName,
       imageScanOnPush: true,
-      imageTagMutability: ecr.TagMutability.IMMUTABLE,
+      imageTagMutability: ecr.TagMutability.IMMUTABLE_WITH_EXCLUSION,
+      imageTagMutabilityExclusionFilters: [
+        ecr.ImageTagMutabilityExclusionFilter.wildcard('latest'),
+      ],
       lifecycleRules: [
         {
           description: 'Keep last 10 images',
