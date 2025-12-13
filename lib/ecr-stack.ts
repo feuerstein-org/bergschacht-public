@@ -39,7 +39,7 @@ export class EcrStack extends cdk.Stack {
       imageScanOnPush: true,
       imageTagMutability: ecr.TagMutability.IMMUTABLE_WITH_EXCLUSION,
       imageTagMutabilityExclusionFilters: [
-        ecr.ImageTagMutabilityExclusionFilter.wildcard('latest'),
+        ecr.ImageTagMutabilityExclusionFilter.wildcard('*latest'),
       ],
       lifecycleRules: [
         {

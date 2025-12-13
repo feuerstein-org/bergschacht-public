@@ -23,7 +23,7 @@ describe('EcrStack', () => {
       ImageTagMutabilityExclusionFilters: [
         {
           ImageTagMutabilityExclusionFilterType: 'WILDCARD',
-          ImageTagMutabilityExclusionFilterValue: 'latest',
+          ImageTagMutabilityExclusionFilterValue: '*latest',
         },
       ],
       ImageScanningConfiguration: {
