@@ -47,9 +47,9 @@ new GitHubActionsStack(app, 'GitHubActionsDevCicd', {
   env: { account: cicdAccount, region: awsRegion },
 });
 
-new GitHubActionsStack(app, 'BergtalzugGitHubActionsEcrPushCicd', {
+new GitHubActionsStack(app, 'MinenwagenGitHubActionsEcrPushCicd', {
   githubOrg: 'feuerstein-org',
-  githubRepo: 'bergtalzug',
+  githubRepo: 'minenwagen',
   githubEnvironment: 'prod',
   githubOidcProvider: githubOidcProviderStack.provider,
   additionalPolicies: [
@@ -71,7 +71,7 @@ new GitHubActionsStack(app, 'BergtalzugGitHubActionsEcrPushCicd', {
         'ecr:UploadLayerPart',
         'ecr:CompleteLayerUpload',
       ],
-      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/bergtalzug`],
+      resources: [`arn:aws:ecr:${awsRegion}:${cicdAccount}:repository/feuerstein/minenwagen`],
     }),
   ],
   env: { account: cicdAccount, region: awsRegion },
@@ -104,8 +104,8 @@ allAccountIds.forEach(([account, name]) => {
 });
 
 // Deploy central ECR Stack in CI/CD account and give pull access to Prod and Dev accounts
-new EcrStack(app, `BergtalzugEcrStackCicd`, {
-  repositoryName: `bergtalzug`,
+new EcrStack(app, `FeuersteinEcrStackCicd`, {
+  repositoryName: `feuerstein`,
   notificationTopic: accountStacks.get('Cicd')!.snsPagerDuty.topic,
   allowedPullAccountIds: [devAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
