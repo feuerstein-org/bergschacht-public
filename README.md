@@ -121,3 +121,14 @@ This stack creates a read-only IAM role in each account (CI/CD, Dev, Prod) that 
 - Creates an IAM role with AWS managed `ReadOnlyAccess` policy
 - Allows the CI/CD account (and GitHubActions roles) to assume the role for monitoring and inspection
 - If needed new ARNs can be added to trusted entities
+
+### EcrStack
+
+This stack creates an ECR repository for storing container images:
+
+- Creates an ECR repository with image scanning enabled on push
+- Configures immutable image tags by default
+- Optionally allows mutable tags matching a wildcard pattern (e.g., `*latest`) via `mutableTagWildcard` parameter
+- Sets up lifecycle rules to keep only the last 10 images
+- Optionally grants cross-account pull permissions to specified AWS accounts
+- Optionally sends SNS notifications when image scans detect CRITICAL or HIGH severity vulnerabilities via EventBridge rules

@@ -19,19 +19,19 @@ describe('EcrStack', () => {
     template.resourceCountIs('AWS::ECR::Repository', 1);
     template.hasResourceProperties('AWS::ECR::Repository', {
       RepositoryName: 'test-repository',
-      ImageTagMutability: 'IMMUTABLE_WITH_EXCLUSION',
-      ImageTagMutabilityExclusionFilters: [
-        {
-          ImageTagMutabilityExclusionFilterType: 'WILDCARD',
-          ImageTagMutabilityExclusionFilterValue: '*latest',
-        },
-      ],
+      ImageTagMutability: 'IMMUTABLE',
       ImageScanningConfiguration: {
         ScanOnPush: true,
       },
       LifecyclePolicy: {
         LifecyclePolicyText: Match.stringLikeRegexp('.*imageCountMoreThan.*countNumber.*10.*'),
       },
+    });
+  });
+
+  test('does not create exclusion filter when mutableTagWildcard is not provided', () => {
+    template.hasResourceProperties('AWS::ECR::Repository', {
+      ImageTagMutabilityExclusionFilters: Match.absent(),
     });
   });
 
@@ -57,6 +57,31 @@ describe('EcrStack', () => {
 
   test('exports the repository for use in other stacks', () => {
     expect(stack.repository).toBeDefined();
+  });
+
+  describe('with mutableTagWildcard', () => {
+    let templateWithMutableTag: Template;
+
+    beforeEach(() => {
+      const app = new cdk.App();
+      const stack = new EcrStack(app, 'TestEcrMutableTag', {
+        repositoryName: 'test-repository',
+        mutableTagWildcard: '*latest',
+      });
+      templateWithMutableTag = Template.fromStack(stack);
+    });
+
+    test('creates ECR repository with IMMUTABLE_WITH_EXCLUSION when mutableTagWildcard is provided', () => {
+      templateWithMutableTag.hasResourceProperties('AWS::ECR::Repository', {
+        ImageTagMutability: 'IMMUTABLE_WITH_EXCLUSION',
+        ImageTagMutabilityExclusionFilters: [
+          {
+            ImageTagMutabilityExclusionFilterType: 'WILDCARD',
+            ImageTagMutabilityExclusionFilterValue: '*latest',
+          },
+        ],
+      });
+    });
   });
 
   describe('with cross-account pull permissions', () => {

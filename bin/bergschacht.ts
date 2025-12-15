@@ -108,6 +108,7 @@ new EcrStack(app, `FeuersteinEcrStackCicd`, {
   repositoryName: `feuerstein`,
   notificationTopic: accountStacks.get('Cicd')!.snsPagerDuty.topic,
   allowedPullAccountIds: [devAccount, prodAccount],
+  mutableTagWildcard: '*latest',
   env: { account: cicdAccount, region: awsRegion },
 });
 

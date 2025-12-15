@@ -22,6 +22,13 @@ export interface EcrStackProps extends cdk.StackProps {
    * @default - No cross-account access granted
    */
   readonly allowedPullAccountIds?: string[];
+  /**
+   * Wildcard pattern for mutable image tags. When provided, tags matching this pattern
+   * will be excluded from immutability enforcement.
+   * @example '*latest'
+   * @default - No exclusion filter, all tags are immutable
+   */
+  readonly mutableTagWildcard?: string;
 }
 
 /**
@@ -37,10 +44,14 @@ export class EcrStack extends cdk.Stack {
     this.repository = new ecr.Repository(this, 'Repository', {
       repositoryName: props.repositoryName,
       imageScanOnPush: true,
-      imageTagMutability: ecr.TagMutability.IMMUTABLE_WITH_EXCLUSION,
-      imageTagMutabilityExclusionFilters: [
-        ecr.ImageTagMutabilityExclusionFilter.wildcard('*latest'),
-      ],
+      imageTagMutability: props.mutableTagWildcard
+        ? ecr.TagMutability.IMMUTABLE_WITH_EXCLUSION
+        : ecr.TagMutability.IMMUTABLE,
+      ...(props.mutableTagWildcard && {
+        imageTagMutabilityExclusionFilters: [
+          ecr.ImageTagMutabilityExclusionFilter.wildcard(props.mutableTagWildcard),
+        ],
+      }),
       lifecycleRules: [
         {
           description: 'Keep last 10 images',
