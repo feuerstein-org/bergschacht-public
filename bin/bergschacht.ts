@@ -78,7 +78,7 @@ allAccountIds.forEach(([account, name]) => {
 
 // Create shared KMS key for ECR and Lambda artifacts in CI/CD account
 const sharedKmsKeyStack = new SharedKmsKeyStack(app, 'SharedKmsKeyCicd', {
-  description: 'Shared KMS key for ECR and Lambda artifacts encryption',
+  description: 'Shared KMS key for Deployment resources',
   allowedDecryptAccountIds: [devAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
 });
