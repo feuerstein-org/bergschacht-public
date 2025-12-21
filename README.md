@@ -63,6 +63,11 @@ To see all available `mise` tasks run `mise run`.
 - `lib/github-oidc-provider-stack.ts` - GitHub OIDC provider stack to CI/CD account
 - `lib/github-actions-stack.ts` - GitHub Actions IAM role stack also deployed to CI/CD account - allows deployment into Prod & Dev accounts based on GitHub environments
 - `lib/readonly-role-stack.ts` - ReadOnly IAM role stack deployed to each account for monitoring and inspection
+- `lib/shared-kms-key-stack.ts` - Shared KMS key stack for encrypting resources (ECR, S3, etc.) with cross-account access
+- `lib/central-logging-bucket-stack.ts` - Centralized S3 bucket for storing access logs from other S3 buckets
+- `lib/lambda-artifacts-stack.ts` - S3 bucket for storing Lambda deployment artifacts with cross-account access
+- `lib/ecr-stack.ts` - ECR repository stack for container images with KMS encryption and cross-account pull access
+- `lib/sns-pager-duty.ts` - SNS topic stack for PagerDuty alerts
 - `lib/constants.ts` - Account mapping and other constants
 - `bin/bergschacht.ts` - CDK app entry point with environment to account mapping
 
@@ -122,11 +127,41 @@ This stack creates a read-only IAM role in each account (CI/CD, Dev, Prod) that 
 - Allows the CI/CD account (and GitHubActions roles) to assume the role for monitoring and inspection
 - If needed new ARNs can be added to trusted entities
 
+### SharedKmsKeyStack
+
+This stack creates a shared KMS key for encrypting resources across accounts:
+
+- Creates a KMS key with automatic key rotation enabled
+- Optionally grants decrypt permissions to specified AWS accounts for cross-account access
+- Optionally creates a key alias for easier reference (e.g., `alias/cicd-deployment-resources`)
+- Exports key ID, ARN, and alias name as CloudFormation outputs
+- Used for encrypting ECR images, S3 buckets (Lambda artifacts, logging), and other AWS resources in CI/CD account
+
+### CentralLoggingBucketStack
+
+This stack creates a centralized S3 bucket for storing logs:
+
+- Creates an S3 bucket with KMS encryption
+- Sets lifecycle rules to transition logs immediately to Glacier Instant Retrieval and delete after 90 days
+- Grants account where stack is deployed access to write logs to the bucket
+- Does not enable server access logging on the logging bucket itself (to avoid infinite loop)
+
+### LambdaArtifactsStack
+
+This stack creates an S3 bucket for storing Lambda deployment artifacts:
+
+- Creates a versioned S3 bucket with KMS encryption using a shared KMS key
+- Optionally grants cross-account read permissions to specified AWS accounts
+- Optionally configures server access logging to a central logging bucket
+- Sets lifecycle rules to delete old versions after 90 days and abort incomplete multipart uploads after 7 days
+- Used by deployment workflows to store and distribute Lambda function code
+
 ### EcrStack
 
 This stack creates an ECR repository for storing container images:
 
 - Creates an ECR repository with image scanning enabled on push
+- Configures KMS encryption using a shared KMS key
 - Configures immutable image tags by default
 - Optionally allows mutable tags matching a wildcard pattern (e.g., `*latest`) via `mutableTagWildcard` parameter
 - Sets up lifecycle rules to keep only the last 10 images
