@@ -8,12 +8,17 @@ export interface SharedKmsKeyStackProps extends cdk.StackProps {
    * Description for the KMS key
    * @default 'Shared KMS key for encryption'
    */
-  readonly description?: string;
+  readonly kmsDescription?: string;
   /**
    * AWS account IDs that should be granted decrypt permissions
    * @default - No additional accounts granted decrypt access
    */
   readonly allowedDecryptAccountIds?: string[];
+  /**
+   * Alias name for the KMS key (without the 'alias/' prefix)
+   * @default - No alias is created
+   */
+  readonly keyAlias?: string;
 }
 
 /**
@@ -28,10 +33,19 @@ export class SharedKmsKeyStack extends cdk.Stack {
 
     // Create the shared KMS key
     this.key = new kms.Key(this, 'SharedEncryptionKey', {
-      description: props.description ?? 'Shared KMS key for encryption',
+      description: props.kmsDescription ?? 'Shared KMS key for encryption',
       enableKeyRotation: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+
+    // Create alias for the key if provided
+    let keyAlias: kms.Alias | undefined;
+    if (props.keyAlias) {
+      keyAlias = new kms.Alias(this, 'KeyAlias', {
+        aliasName: `alias/${props.keyAlias}`,
+        targetKey: this.key,
+      });
+    }
 
     // Grant decrypt permission to specified accounts
     if (props.allowedDecryptAccountIds && props.allowedDecryptAccountIds.length > 0) {
@@ -60,5 +74,13 @@ export class SharedKmsKeyStack extends cdk.Stack {
       description: 'KMS Key ARN',
       exportName: `${this.stackName}-KeyArn`,
     });
+
+    if (keyAlias) {
+      new cdk.CfnOutput(this, 'KeyAliasName', {
+        value: keyAlias.aliasName,
+        description: 'KMS Key Alias Name',
+        exportName: `${this.stackName}-KeyAliasName`,
+      });
+    }
   }
 }

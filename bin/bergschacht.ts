@@ -77,16 +77,17 @@ allAccountIds.forEach(([account, name]) => {
 });
 
 // Create shared KMS key for ECR and Lambda artifacts in CI/CD account
-const sharedKmsKeyStack = new SharedKmsKeyStack(app, 'SharedKmsKeyCicd', {
-  description: 'Shared KMS key for Deployment resources',
+const deploymentResourcesKmsKeyStack = new SharedKmsKeyStack(app, 'DeploymentResourcesKmsKeyCicd', {
+  kmsDescription: 'Shared KMS key for Deployment resources',
+  keyAlias: 'cicd-deployment-resources',
   allowedDecryptAccountIds: [devAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
 });
 
 // Create centralized logging bucket for CI/CD account
 const centralLoggingBucket = new CentralLoggingBucketStack(app, 'CentralLoggingBucketCicd', {
-  bucketName: 'example-cicd-access-logs',
-  encryptionKey: sharedKmsKeyStack.key,
+  bucketName: 'example-cicd-logs',
+  encryptionKey: deploymentResourcesKmsKeyStack.key,
   env: { account: cicdAccount, region: awsRegion },
 });
 
@@ -94,7 +95,7 @@ const centralLoggingBucket = new CentralLoggingBucketStack(app, 'CentralLoggingB
 new LambdaArtifactsStack(app, 'LambdaArtifactsStackCicd', {
   bucketName: 'example-lambda-artifacts',
   allowedAccountIds: [devAccount, prodAccount],
-  encryptionKey: sharedKmsKeyStack.key,
+  encryptionKey: deploymentResourcesKmsKeyStack.key,
   serverAccessLogsBucket: centralLoggingBucket.bucket,
   env: { account: cicdAccount, region: awsRegion },
 });
@@ -151,7 +152,7 @@ new GitHubActionsStack(app, 'MinenwagenGitHubActionsEcrPushCicd', {
         'kms:ReEncrypt*',
         'kms:GenerateDataKey*',
       ],
-      resources: [sharedKmsKeyStack.key.keyArn],
+      resources: [deploymentResourcesKmsKeyStack.key.keyArn],
     }),
   ],
   env: { account: cicdAccount, region: awsRegion },
@@ -163,7 +164,7 @@ new EcrStack(app, `FeuersteinEcrStackCicd`, {
   notificationTopic: accountStacks.get('Cicd')!.snsPagerDuty.topic,
   allowedPullAccountIds: [devAccount, prodAccount],
   mutableTagWildcard: '*latest',
-  encryptionKey: sharedKmsKeyStack.key,
+  encryptionKey: deploymentResourcesKmsKeyStack.key,
   env: { account: cicdAccount, region: awsRegion },
 });
 

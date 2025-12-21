@@ -9,7 +9,8 @@ describe('SharedKmsKeyStack', () => {
   beforeEach(() => {
     const app = new cdk.App();
     stack = new SharedKmsKeyStack(app, 'TestSharedKmsKey', {
-      description: 'Test shared KMS key',
+      kmsDescription: 'Test shared KMS key',
+      keyAlias: 'test-kms-key',
       allowedDecryptAccountIds: ['123456789012', '210987654321'],
     });
     template = Template.fromStack(stack);
@@ -58,6 +59,12 @@ describe('SharedKmsKeyStack', () => {
     });
   });
 
+  test('creates KMS key alias when provided', () => {
+    template.hasResourceProperties('AWS::KMS::Alias', {
+      AliasName: 'alias/test-kms-key',
+    });
+  });
+
   test('creates CloudFormation outputs for key ID and ARN', () => {
     template.hasOutput('KeyId', {
       Description: 'KMS Key ID',
@@ -65,6 +72,12 @@ describe('SharedKmsKeyStack', () => {
 
     template.hasOutput('KeyArn', {
       Description: 'KMS Key ARN',
+    });
+  });
+
+  test('creates CloudFormation output for key alias when provided', () => {
+    template.hasOutput('KeyAliasName', {
+      Description: 'KMS Key Alias Name',
     });
   });
 
@@ -78,9 +91,19 @@ describe('SharedKmsKeyStack', () => {
     beforeEach(() => {
       const app = new cdk.App();
       const stack = new SharedKmsKeyStack(app, 'TestSharedKmsKeyNoAccounts', {
-        description: 'Test shared KMS key without accounts',
+        kmsDescription: 'Test shared KMS key without accounts',
       });
       templateWithoutAccounts = Template.fromStack(stack);
+    });
+
+    test('does not create alias when not provided', () => {
+      templateWithoutAccounts.resourceCountIs('AWS::KMS::Alias', 0);
+    });
+
+    test('does not create alias output when alias is not provided', () => {
+      expect(() => {
+        templateWithoutAccounts.hasOutput('KeyAliasName', {});
+      }).toThrow();
     });
 
     test('does not create cross-account decrypt policy when allowedDecryptAccountIds is not provided', () => {
