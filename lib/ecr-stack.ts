@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as events from 'aws-cdk-lib/aws-events';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import { Construct } from 'constructs';
@@ -29,6 +30,10 @@ export interface EcrStackProps extends cdk.StackProps {
    * @default - No exclusion filter, all tags are immutable
    */
   readonly mutableTagWildcard?: string;
+  /**
+   * Customer managed KMS key for encrypting repository images
+   */
+  readonly encryptionKey: kms.IKey;
 }
 
 /**
@@ -36,14 +41,20 @@ export interface EcrStackProps extends cdk.StackProps {
  */
 export class EcrStack extends cdk.Stack {
   public readonly repository: ecr.IRepository;
+  public readonly encryptionKey: kms.IKey;
 
   constructor(scope: Construct, id: string, props: EcrStackProps) {
     super(scope, id, props);
+
+    // Create or use provided KMS key for repository encryption
+    this.encryptionKey = props.encryptionKey;
 
     // Create ECR repository
     this.repository = new ecr.Repository(this, 'Repository', {
       repositoryName: props.repositoryName,
       imageScanOnPush: true,
+      encryption: ecr.RepositoryEncryption.KMS,
+      encryptionKey: this.encryptionKey,
       imageTagMutability: props.mutableTagWildcard
         ? ecr.TagMutability.IMMUTABLE_WITH_EXCLUSION
         : ecr.TagMutability.IMMUTABLE,
@@ -63,9 +74,20 @@ export class EcrStack extends cdk.Stack {
 
     // Grant cross-account pull permissions if specified
     if (props.allowedPullAccountIds && props.allowedPullAccountIds.length > 0) {
-      props.allowedPullAccountIds.forEach((accountId) => {
-        this.repository.grantPull(new iam.AccountPrincipal(accountId));
-      });
+      this.repository.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: 'AllowCrossAccountPull',
+          effect: iam.Effect.ALLOW,
+          principals: props.allowedPullAccountIds.map(
+            (accountId) => new iam.AccountPrincipal(accountId)
+          ),
+          actions: [
+            'ecr:GetDownloadUrlForLayer',
+            'ecr:BatchGetImage',
+            'ecr:BatchCheckLayerAvailability',
+          ],
+        })
+      );
     }
 
     new cdk.CfnOutput(this, 'RepositoryUri', {
