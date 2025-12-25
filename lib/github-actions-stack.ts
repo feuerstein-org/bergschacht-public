@@ -17,7 +17,7 @@ export interface GitHubActionsStackProps extends cdk.StackProps {
   readonly githubRepo: string;
 
   /**
-   * GitHub environment name. If not provided, allows entire repository.
+   * GitHub environment name.
    * @example 'prod', 'dev', 'staging'
    */
   readonly githubEnvironment: string;

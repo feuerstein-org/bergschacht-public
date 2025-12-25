@@ -1,0 +1,59 @@
+name: Test & CDK diff
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# Required for OIDC authentication with AWS
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  MISE_OVERRIDE_CONFIG_FILENAMES: 'mise.ci.toml'
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: mise run install-ci
+
+      - name: Pre-commit
+        run: mise run pre-commit-ci
+
+  test:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: mise run install-ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Test-${{ github.run_id }}
+
+      - name: Build
+        run: mise run build-ci
+
+      - name: Test
+        run: mise run test-ci
+
+      - name: Diff CDK
+        run: mise run diff-ci

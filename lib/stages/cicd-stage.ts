@@ -6,6 +6,8 @@ import { CentralLoggingBucketStack } from '../central-logging-bucket-stack';
 import { LambdaArtifactsStack } from '../lambda-artifacts-stack';
 import { EcrStack } from '../ecr-stack';
 import { SnsPagerDutyStack } from '../sns-pager-duty';
+import { GitHubOIDCProviderStack } from '../github-oidc-provider-stack';
+import { GitHubActionsStack } from '../github-actions-stack';
 
 export interface CicdStageProps extends cdk.StageProps {
   /**
@@ -41,6 +43,21 @@ export class CicdStage extends cdk.Stage {
     super(scope, id, props);
 
     const { cicdAccountId, devAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
+
+    // GitHub OIDC Provider Stack - creates the OIDC provider once per account
+    const githubOidcProviderStack = new GitHubOIDCProviderStack(this, 'GitHubOIDCProviderCicd', {
+      env: { account: cicdAccountId, region: awsRegion },
+    });
+
+    // GitHub Actions Stack - sets up IAM roles for GitHub Actions to run CDK diff
+    new GitHubActionsStack(this, 'GitHubActionsProdCicd', {
+      githubOrg: 'feuerstein-org',
+      githubRepo: 'bergschacht',
+      githubEnvironment: 'dev',
+      lookupAccountIds: [[cicdAccountId, 'CICD'], [devAccountId, 'Dev'], [prodAccountId, 'Prod']],
+      githubOidcProvider: githubOidcProviderStack.provider,
+      env: { account: cicdAccountId, region: awsRegion },
+    });
 
     // Create SNS PagerDuty topic for CICD account
     const snsPagerDutyStack = new SnsPagerDutyStack(this, 'SnsPagerDuty', {
