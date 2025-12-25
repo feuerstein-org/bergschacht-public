@@ -101,9 +101,12 @@ export class GitHubActionsStack extends cdk.Stack {
       assumedBy: new iam.OpenIdConnectPrincipal(props.githubOidcProvider, conditions),
     });
 
+    // Create policy statements
+    const policyStatements: iam.PolicyStatement[] = [];
+
     // Grant cross-account permissions to assume CDK roles in deployment accounts
     deployAccountIds.forEach((accountId) =>
-      githubActionsRole.addToPolicy(
+      policyStatements.push(
         new iam.PolicyStatement({
           sid: `AllowAssumeDeploymentRoleIn${accountId[1]}Account`,
           effect: iam.Effect.ALLOW,
@@ -115,7 +118,7 @@ export class GitHubActionsStack extends cdk.Stack {
 
     // Grant cross-account permissions to assume CDK lookup roles in lookup accounts
     lookupAccountIds.forEach((accountId) =>
-      githubActionsRole.addToPolicy(
+      policyStatements.push(
         new iam.PolicyStatement({
           sid: `AllowAssumeLookupRoleIn${accountId[1]}Account`,
           effect: iam.Effect.ALLOW,
@@ -125,17 +128,21 @@ export class GitHubActionsStack extends cdk.Stack {
       )
     );
 
-    // Apply additional custom policy statements
-    additionalPolicies.forEach((policy) => githubActionsRole.addToPolicy(policy));
+    // Add additional custom policy statements
+    policyStatements.push(...additionalPolicies);
+
+    const rolePolicy = new iam.Policy(this, 'GitHubActionsRolePolicy', {
+      statements: policyStatements,
+    });
+    rolePolicy.attachToRole(githubActionsRole);
 
     this.role = githubActionsRole;
 
     // Suppress CDK Nag warnings for wildcard permissions in CDK role ARNs
     // These wildcards are necessary to allow GitHub Actions to assume CDK bootstrap roles
     // and for additional policies that may contain wildcards (e.g., ECR push permissions)
-    NagSuppressions.addResourceSuppressionsByPath(
-      this,
-      `${this.stackName}/GitHubActionsRole/DefaultPolicy/Resource`,
+    NagSuppressions.addResourceSuppressions(
+      rolePolicy,
       [
         {
           id: 'AwsSolutions-IAM5',

@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { SharedKmsKeyStack } from '../shared-kms-key-stack';
 import { CentralLoggingBucketStack } from '../central-logging-bucket-stack';
@@ -42,6 +43,9 @@ export class CicdStage extends cdk.Stage {
   constructor(scope: Construct, id: string, props: CicdStageProps) {
     super(scope, id, props);
 
+    // Add CDK Nag checks to all stacks in this stage
+    cdk.Aspects.of(this).add(new AwsSolutionsChecks({ verbose: true }));
+
     const { cicdAccountId, devAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
 
     // GitHub OIDC Provider Stack - creates the OIDC provider once per account
@@ -50,11 +54,15 @@ export class CicdStage extends cdk.Stage {
     });
 
     // GitHub Actions Stack - sets up IAM roles for GitHub Actions to run CDK diff
-    new GitHubActionsStack(this, 'GitHubActionsProdCicd', {
+    new GitHubActionsStack(this, 'FeuersteinBergschachtDevGitHubActions', {
       githubOrg: 'feuerstein-org',
       githubRepo: 'bergschacht',
       githubEnvironment: 'dev',
-      lookupAccountIds: [[cicdAccountId, 'CICD'], [devAccountId, 'Dev'], [prodAccountId, 'Prod']],
+      lookupAccountIds: [
+        [cicdAccountId, 'CICD'],
+        [devAccountId, 'Dev'],
+        [prodAccountId, 'Prod'],
+      ],
       githubOidcProvider: githubOidcProviderStack.provider,
       env: { account: cicdAccountId, region: awsRegion },
     });

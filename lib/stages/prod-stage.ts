@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
+import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { ReadOnlyRoleStack } from '../readonly-role-stack';
 import { SnsPagerDutyStack } from '../sns-pager-duty';
@@ -28,6 +29,9 @@ export interface ProdStageProps extends cdk.StageProps {
 export class ProdStage extends cdk.Stage {
   constructor(scope: Construct, id: string, props: ProdStageProps) {
     super(scope, id, props);
+
+    // Add CDK Nag checks to all stacks in this stage
+    cdk.Aspects.of(this).add(new AwsSolutionsChecks({ verbose: true }));
 
     const { cicdAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
 
