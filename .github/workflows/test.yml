@@ -13,6 +13,8 @@ permissions:
   contents: read
 
 env:
+  CICD_ACCOUNT_ID: ${{ vars.CICD_ACCOUNT_ID }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
   MISE_OVERRIDE_CONFIG_FILENAMES: 'mise.ci.toml'
 
 jobs:
