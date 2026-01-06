@@ -10,7 +10,6 @@ description = "Install all dependencies"
 run = [
     "pnpm install",
     "pre-commit install",
-    "pnpm add -g ajv-cli ajv-formats",
     "uv sync --all-extras --dev",
 ]
 

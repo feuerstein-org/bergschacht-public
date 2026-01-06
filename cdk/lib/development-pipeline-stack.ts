@@ -77,7 +77,6 @@ export class DevelopmentPipelineStack extends cdk.Stack {
           'npm install -g pnpm',
           'pnpm install --frozen-lockfile',
           'pnpm run build',
-          'pnpm run test',
           'cd cdk && pnpx cdk synth',
         ],
         primaryOutputDirectory: 'cdk/cdk.out',

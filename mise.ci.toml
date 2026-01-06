@@ -12,7 +12,6 @@ uv = "latest"
 description = "Install dependencies for CI"
 run = [
     "pnpm install",
-    "pnpm add -D ajv-cli ajv-formats",
     "uv sync --all-extras --dev",
 ]
 
