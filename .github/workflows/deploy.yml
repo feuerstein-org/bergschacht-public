@@ -248,7 +248,6 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "Lambda package does not exist, will build"
           fi
-          fi
 
       - name: Set up Python for Lambda build
         if: steps.check-lambda.outputs.exists != 'true'

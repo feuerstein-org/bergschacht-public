@@ -122,6 +122,7 @@ export class CicdStage extends cdk.Stage {
             'ecr:InitiateLayerUpload',
             'ecr:UploadLayerPart',
             'ecr:CompleteLayerUpload',
+            'ecr:DescribeImages',
           ],
           resources: [`arn:aws:ecr:${awsRegion}:${cicdAccountId}:repository/feuerstein`],
         }),
