@@ -329,7 +329,7 @@ jobs:
     needs: [detect-changes, create-tags, deploy-docker, deploy-lambda]
     if: |
       always() &&
-      needs.create-tags.result == 'success' &&
+      (needs.create-tags.result == 'success' || needs.create-tags.result == 'skipped') &&
       (needs.deploy-docker.result == 'success' || needs.deploy-docker.result == 'skipped') &&
       (needs.deploy-lambda.result == 'success' || needs.deploy-lambda.result == 'skipped') &&
       (needs.detect-changes.outputs.docker_packages != '[]' || needs.detect-changes.outputs.lambda_packages != '[]')
@@ -393,7 +393,7 @@ jobs:
     # Run if no deploy jobs failed (allows skipping)
     if: |
       always() &&
-      needs.create-tags.result == 'success' &&
+      (needs.create-tags.result == 'success' || needs.create-tags.result == 'skipped') &&
       (needs.deploy-docker.result == 'success' || needs.deploy-docker.result == 'skipped') &&
       (needs.deploy-lambda.result == 'success' || needs.deploy-lambda.result == 'skipped') &&
       (needs.commit-manifest.result == 'success' || needs.commit-manifest.result == 'skipped')
