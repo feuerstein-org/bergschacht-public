@@ -5,11 +5,16 @@ import cdkPlugin from 'eslint-plugin-awscdk';
 import jsdoc from 'eslint-plugin-jsdoc';
 
 export default defineConfig([
-  ...tseslint.configs.recommended,
+  {
+    ignores: ['**/*.d.ts', '**/*.js'],
+  },
+  {
+    files: ['**/*.ts'],
+    extends: [...tseslint.configs.recommended],
+  },
   {
     ...cdkPlugin.configs.strict,
-    files: ['lib/**/*.ts', 'bin/*.ts', 'test/**/*.ts'],
-    ignores: ['**/*.d.ts'],
+    files: ['lib/**/*.ts', 'bin/**/*.ts', 'test/**/*.ts'],
     plugins: {
       ...cdkPlugin.configs.strict.plugins,
       jsdoc,

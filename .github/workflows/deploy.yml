@@ -1,0 +1,418 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  ROLE_NAME: ${{ github.event.repository.name }}-prod-github-actions-role
+  MISE_OVERRIDE_CONFIG_FILENAMES: 'mise.ci.toml'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_packages: ${{ steps.categorize.outputs.docker_packages }}
+      lambda_packages: ${{ steps.categorize.outputs.lambda_packages }}
+      package_versions: ${{ steps.categorize.outputs.package_versions }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate filters for all packages
+        id: generate-filters
+        run: |
+          filters=""
+          for dir in packages/*/; do
+            if [ -f "$dir/pyproject.toml" ]; then
+              pkg=$(basename "$dir")
+              filters="${filters}${pkg}:\n  - 'packages/${pkg}/**'\n"
+            fi
+          done
+          echo "Generated filters:"
+          echo -e "$filters"
+          echo "filters<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$filters" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Detect changed packages
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: ${{ steps.generate-filters.outputs.filters }}
+
+      - name: Categorize packages by deployment type
+        id: categorize
+        run: python3 .github/scripts/categorize_packages.py '${{ steps.filter.outputs.changes }}'
+
+  create-tags:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docker_packages != '[]' || needs.detect-changes.outputs.lambda_packages != '[]'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Create version tags for all changed packages
+        env:
+          PACKAGE_VERSIONS: ${{ needs.detect-changes.outputs.package_versions }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Combine docker and lambda packages, deduplicate
+          DOCKER_PACKAGES='${{ needs.detect-changes.outputs.docker_packages }}'
+          LAMBDA_PACKAGES='${{ needs.detect-changes.outputs.lambda_packages }}'
+
+          ALL_PACKAGES=$(echo "$DOCKER_PACKAGES $LAMBDA_PACKAGES" | tr -d '[]"' | tr ',' '\n' | sort -u | grep -v '^$')
+
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+
+          for pkg in $ALL_PACKAGES; do
+            VERSION=$(echo "$PACKAGE_VERSIONS" | jq -r ".\"$pkg\"")
+            TAG="${pkg}-v${VERSION}"
+
+            if git ls-remote --tags origin | grep -q "refs/tags/$TAG$"; then
+              # Tag exists remotely, check if it's on current commit
+              git fetch origin "refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null || true
+              TAG_COMMIT=$(git rev-list -n 1 "$TAG" 2>/dev/null || echo "")
+
+              if [ "$TAG_COMMIT" = "$CURRENT_COMMIT" ]; then
+                echo "Tag $TAG already exists on current commit. Redeploying package."
+              else
+                echo "::error::Tag $TAG already exists on a different commit. Please bump the version in your package before deploying."
+                exit 1
+              fi
+            else
+              echo "Creating tag $TAG..."
+              git tag -a "$TAG" -m "Release $pkg version $VERSION"
+              git push origin "$TAG"
+              echo "Created and pushed tag $TAG"
+            fi
+          done
+
+  deploy-docker:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, create-tags]
+    if: needs.detect-changes.outputs.docker_packages != '[]'
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.docker_packages) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: prod
+    env:
+      ECR_REPOSITORY: ${{ vars.CICD_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Extract version from pyproject.toml
+        id: config
+        run: python3 .github/scripts/extract_config.py "${{ matrix.package }}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-Docker-${{ github.run_id }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Check if image already exists
+        id: check-image
+        continue-on-error: true
+        run: |
+          IMAGE_TAG="${{ github.event.repository.name }}-${{ matrix.package }}-${{ steps.config.outputs.version }}"
+
+          # Try to get the image manifest
+          if aws ecr describe-images \
+            --repository-name ${{ vars.ECR_REPOSITORY_NAME }} \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region ${{ vars.AWS_REGION }} > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image $IMAGE_TAG already exists in ECR, skipping build"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image $IMAGE_TAG does not exist, will build"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check-image.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata (tags, labels) for Docker
+        if: steps.check-image.outputs.exists != 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ECR_REPOSITORY }}
+          flavor: |
+            prefix=${{ github.event.repository.name }}-${{ matrix.package }}-
+          tags: |
+            type=raw,value=${{ steps.config.outputs.version }}
+            type=sha,format=long
+
+      - name: Build and push to ECR
+        if: steps.check-image.outputs.exists != 'true'
+        id: docker-build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/${{ matrix.package }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create deployment metadata
+        run: |
+          mkdir -p deployment-metadata
+
+          cat > deployment-metadata/metadata.json << EOF
+          {
+            "type": "docker",
+            "packageName": "${{ matrix.package }}",
+            "version": "${{ steps.config.outputs.version }}",
+            "commitSha": "${{ github.sha }}",
+            "repository": "${{ env.ECR_REPOSITORY }}",
+            "imageTag": "${{ github.event.repository.name }}-${{ matrix.package }}-${{ steps.config.outputs.version }}"
+          }
+          EOF
+
+      - name: Upload deployment metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-metadata-docker-${{ matrix.package }}
+          path: deployment-metadata/metadata.json
+          retention-days: 1
+
+  deploy-lambda:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, create-tags]
+    if: needs.detect-changes.outputs.lambda_packages != '[]'
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.lambda_packages) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: prod
+    env:
+      LAMBDA_S3_BUCKET_NAME: ${{ vars.LAMBDA_S3_BUCKET_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Extract version and Lambda config from pyproject.toml
+        id: config
+        run: python3 .github/scripts/extract_config.py "${{ matrix.package }}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-Lambda-${{ github.run_id }}
+
+      - name: Check if Lambda package already exists
+        id: check-lambda
+        continue-on-error: true
+        run: |
+          S3_KEY="${{ github.event.repository.name }}/${{ matrix.package }}/${{ matrix.package }}.zip"
+
+          if aws s3 head-object \
+            --bucket ${{ env.LAMBDA_S3_BUCKET_NAME }} \
+            --key "$S3_KEY" > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "s3_key=$S3_KEY" >> $GITHUB_OUTPUT
+            echo "Lambda package already exists at s3://${{ env.LAMBDA_S3_BUCKET_NAME }}/$S3_KEY, skipping build"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Lambda package does not exist, will build"
+          fi
+          fi
+
+      - name: Set up Python for Lambda build
+        if: steps.check-lambda.outputs.exists != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        if: steps.check-lambda.outputs.exists != 'true'
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build Lambda deployment package
+        if: steps.check-lambda.outputs.exists != 'true'
+        id: lambda-build
+        run: |
+          PACKAGE_DIR="packages/${{ matrix.package }}"
+          BUILD_DIR="lambda_build"
+          ZIP_NAME="${{ matrix.package }}.zip"
+
+          mkdir -p "$BUILD_DIR"
+
+          uv pip install \
+            --target "$BUILD_DIR" \
+            --python python3.14 \
+            "$PACKAGE_DIR"
+
+          cd "$BUILD_DIR"
+          zip -r "../$ZIP_NAME" .
+          cd ..
+
+          echo "zip_file=$ZIP_NAME" >> $GITHUB_OUTPUT
+          S3_KEY="${{ github.event.repository.name }}/${{ matrix.package }}/$ZIP_NAME"
+          echo "s3_key=$S3_KEY" >> $GITHUB_OUTPUT
+
+          echo "Built Lambda package: $ZIP_NAME"
+          ls -lh "$ZIP_NAME"
+
+      - name: Upload Lambda package to S3
+        if: steps.check-lambda.outputs.exists != 'true'
+        id: s3-upload
+        run: |
+          aws s3 cp \
+            "${{ steps.lambda-build.outputs.zip_file }}" \
+            "s3://${{ env.LAMBDA_S3_BUCKET_NAME }}/${{ steps.lambda-build.outputs.s3_key }}"
+
+          echo "Uploaded to s3://${{ env.LAMBDA_S3_BUCKET_NAME }}/${{ steps.lambda-build.outputs.s3_key }}"
+
+      - name: Create deployment metadata
+        run: |
+          mkdir -p deployment-metadata
+
+          # Use new S3 key if built, otherwise use existing
+          if [ "${{ steps.check-lambda.outputs.exists }}" = "true" ]; then
+            S3_KEY="${{ steps.check-lambda.outputs.s3_key }}"
+          else
+            S3_KEY="${{ steps.lambda-build.outputs.s3_key }}"
+          fi
+
+          cat > deployment-metadata/metadata.json << EOF
+          {
+            "type": "lambda",
+            "packageName": "${{ matrix.package }}",
+            "version": "${{ steps.config.outputs.version }}",
+            "commitSha": "${{ github.sha }}",
+            "bucket": "${{ env.LAMBDA_S3_BUCKET_NAME }}",
+            "key": "$S3_KEY"
+          }
+          EOF
+
+      - name: Upload deployment metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-metadata-lambda-${{ matrix.package }}
+          path: deployment-metadata/metadata.json
+          retention-days: 1
+
+  commit-manifest:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, create-tags, deploy-docker, deploy-lambda]
+    if: |
+      always() &&
+      needs.create-tags.result == 'success' &&
+      (needs.deploy-docker.result == 'success' || needs.deploy-docker.result == 'skipped') &&
+      (needs.deploy-lambda.result == 'success' || needs.deploy-lambda.result == 'skipped') &&
+      (needs.detect-changes.outputs.docker_packages != '[]' || needs.detect-changes.outputs.lambda_packages != '[]')
+    concurrency:
+      group: version-manifest-commit
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Download all deployment metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deployment-metadata-*
+          path: deployment-metadata
+
+      - name: Update version manifest from metadata
+        run: |
+          for metadata_file in deployment-metadata/*/metadata.json; do
+            if [ ! -f "$metadata_file" ]; then
+              echo "No deployment metadata found"
+              continue
+            fi
+
+            echo "Processing: $metadata_file"
+            python3 .github/scripts/update_version_manifest.py --from-metadata "$metadata_file"
+          done
+
+      - name: Commit merged manifest
+        run: |
+          if git diff --quiet version-manifests/latest.json; then
+            echo "No manifest changes to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add version-manifests/latest.json
+          git commit -m "chore: update package versions [skip ci]"
+
+          # Retry push with rebase in case of concurrent updates
+          for i in {1..5}; do
+            if git push; then
+              echo "Successfully pushed manifest update"
+              break
+            else
+              echo "Push failed, retrying in $((i * 2)) seconds..."
+              sleep $((i * 2))
+              git pull --rebase origin master
+            fi
+          done
+
+  deploy-cdk:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, create-tags, deploy-docker, deploy-lambda, commit-manifest]
+    # Run if no deploy jobs failed (allows skipping)
+    if: |
+      always() &&
+      needs.create-tags.result == 'success' &&
+      (needs.deploy-docker.result == 'success' || needs.deploy-docker.result == 'skipped') &&
+      (needs.deploy-lambda.result == 'success' || needs.deploy-lambda.result == 'skipped') &&
+      (needs.commit-manifest.result == 'success' || needs.commit-manifest.result == 'skipped')
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: prod
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-CDK-${{ github.run_id }}
+
+      - name: Trigger CDK Pipeline
+        run: |
+          echo "Triggering CDK Pipeline deployment..."
+          aws codepipeline start-pipeline-execution --name ${{ vars.PROD_CDK_PIPELINE_NAME }}
+          echo "CDK Pipeline triggered successfully"

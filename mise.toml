@@ -2,43 +2,90 @@
 pnpm = "latest"
 pre-commit = "latest"
 node = "24"
+python = "3.14"
+uv = "latest"
 
 [tasks.install]
 description = "Install all dependencies"
 run = [
     "pnpm install",
-    "pre-commit install"
+    "pre-commit install",
+    "pnpm add -g ajv-cli ajv-formats",
+    "uv sync --all-extras --dev",
 ]
 
 [tasks.pre-commit]
 description = "Run pre-commit hooks on all files"
 run = "pre-commit run --all-files"
 
-[tasks.build]
-description = "Build"
-run = "pnpm run build"
+# Python tasks
+[tasks.py-lint]
+description = "Show all issues detected by Python linter"
+run = [
+    "uv run ruff check .",
+    "uv run ruff format . --check",
+]
 
-[tasks.test]
+[tasks.py-lint-fix]
+description = "Fix all auto-fixable Python linting issues"
+run = [
+    "uv run ruff check --fix .",
+    "uv run ruff format .",
+]
+
+[tasks.py-test]
+description = "Run tests with coverage in CI for a specific package"
+usage = '''
+arg "[package]" help="Package to run tests for"
+'''
+run = '''
+if [ -z "${usage_package:-}" ]; then
+    echo "Error: No package specified. Please provide a package name." >&2
+    exit 1
+fi
+echo "Running tests for package: ${usage_package}"
+uv run --package ${usage_package} coverage run -m pytest
+uv run --package ${usage_package} coverage report --fail-under=80
+'''
+
+# CDK tasks
+[tasks.cdk-build]
+description = "Build CDK"
+run = "pnpm --filter cdk run build"
+
+[tasks.cdk-test]
 description = "Build & run tests on all files"
-depends = ["build"]
-run = "pnpm run test"
+depends = ["cdk-build"]
+run = "pnpm --filter cdk run test"
 
-[tasks.test-full]
+[tasks.cdk-test-full]
 description = "Build & run full test suite & synth all stack, pass a stack name to see the CFN"
-depends = ["test", "pre-commit"]
-run = "pnpm run cdk synth"
+depends = ["cdk-test", "pre-commit"]
+run = "pnpm --filter cdk run cdk synth"
 
-[tasks.synth]
-description = "Build & synthesize all stacks, pass a stack name to see the CFN"
-depends = ["build"]
-run = "pnpm run cdk synth"
+[tasks.cdk-synth]
+description = "Build & synthesize stacks (defaults to all with '**', or pass stack names)"
+depends = ["cdk-build"]
+usage = 'arg "[stacks]..." help="Stack names to synth (defaults to ** for all)"'
+run = '''
+stacks="${usage_stacks:-**}"
+pnpm --filter cdk run cdk synth "$stacks"
+'''
 
-[tasks.diff]
-description = "Build & see diff for all stacks, pass a stack name to filter"
-depends = ["build"]
-run = "pnpm run cdk diff"
+[tasks.cdk-diff]
+description = "Build & see diff for stacks (defaults to all with '**', or pass stack names)"
+depends = ["cdk-build"]
+usage = 'arg "[stacks]..." help="Stack names to diff (defaults to ** for all)"'
+run = '''
+stacks="${usage_stacks:-**}"
+pnpm --filter cdk run cdk diff "$stacks"
+'''
 
-[tasks.deploy]
-description = "Deploy Stack(s), pass args (stacks) as needed, package is built before deployment"
-depends = ["build"]
-run = "pnpm run cdk deploy"
+[tasks.cdk-deploy]
+description = "Deploy stacks (defaults to all with '**', or pass stack names)"
+depends = ["cdk-build"]
+usage = 'arg "[stacks]..." help="Stack names to deploy (defaults to ** for all)"'
+run = '''
+stacks="${usage_stacks:-**}"
+pnpm --filter cdk run cdk deploy "$stacks"
+'''

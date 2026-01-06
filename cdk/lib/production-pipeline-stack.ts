@@ -79,7 +79,7 @@ export class ProductionPipelineStack extends cdk.Stack {
           branch,
           {
             connectionArn: props.connectionArn,
-            triggerOnPush: true,
+            triggerOnPush: false,
           }
         ),
         commands: [
@@ -88,9 +88,9 @@ export class ProductionPipelineStack extends cdk.Stack {
           'pnpm install --frozen-lockfile',
           'pnpm run build',
           'pnpm run test',
-          'npx cdk synth',
+          'cd cdk && pnpx cdk synth',
         ],
-        primaryOutputDirectory: 'cdk.out',
+        primaryOutputDirectory: 'cdk/cdk.out',
       }),
       dockerEnabledForSynth: false,
       selfMutation: true,

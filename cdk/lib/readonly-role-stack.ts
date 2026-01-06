@@ -32,11 +32,13 @@ export class ReadOnlyRoleStack extends cdk.Stack {
       roleName: 'ReadOnly',
       description: 'Read-only access role for monitoring and inspection',
       assumedBy: compositePrincipal,
-      managedPolicies: [
-        // AWS managed ReadOnlyAccess policy for ReadOnly access
-        iam.ManagedPolicy.fromAwsManagedPolicyName('ReadOnlyAccess'),
-      ],
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('ReadOnlyAccess')],
     });
+
+    cdk.Annotations.of(readOnlyRole).acknowledgeWarning(
+      '@aws-cdk/core:addConstructMetadataFailed',
+      'Metadata warning from fromAwsManagedPolicyName is expected and harmless'
+    );
 
     this.role = readOnlyRole;
 

@@ -51,11 +51,14 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Test-${{ github.run_id }}
 
-      - name: Build
-        run: mise run build-ci
+      - name: Test Python
+        run: mise run py-test-ci
 
-      - name: Test
-        run: mise run test-ci
+      - name: Build CDK
+        run: mise run cdk-build-ci
+
+      - name: Test CDK
+        run: mise run cdk-test-ci
 
       - name: Diff CDK
-        run: mise run diff-ci
+        run: mise run cdk-diff-ci

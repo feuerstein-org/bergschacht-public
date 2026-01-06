@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
@@ -53,27 +54,6 @@ export class CicdStage extends cdk.Stage {
       env: { account: cicdAccountId, region: awsRegion },
     });
 
-    // GitHub Actions Stack - sets up IAM roles for GitHub Actions to run CDK diff
-    new GitHubActionsStack(this, 'FeuersteinBergschachtDevGitHubActions', {
-      githubOrg: 'feuerstein-org',
-      githubRepo: 'bergschacht',
-      githubEnvironment: 'dev',
-      lookupAccountIds: [
-        [cicdAccountId, 'CICD'],
-        [devAccountId, 'Dev'],
-        [prodAccountId, 'Prod'],
-      ],
-      githubOidcProvider: githubOidcProviderStack.provider,
-      env: { account: cicdAccountId, region: awsRegion },
-    });
-
-    // Create SNS PagerDuty topic for CICD account
-    const snsPagerDutyStack = new SnsPagerDutyStack(this, 'SnsPagerDuty', {
-      topicName: 'PagerDutyAlertsCicd',
-      emailAddress: pagerDutyEmail,
-      env: { account: cicdAccountId, region: awsRegion },
-    });
-
     // Create shared KMS key for ECR and Lambda artifacts in CI/CD account
     const deploymentResourcesKmsKeyStack = new SharedKmsKeyStack(
       this,
@@ -88,6 +68,90 @@ export class CicdStage extends cdk.Stage {
         env: { account: cicdAccountId, region: awsRegion },
       }
     );
+
+    // GitHub Actions Stack - sets up IAM roles for GitHub Actions to run CDK diff
+    new GitHubActionsStack(this, 'FeuersteinBergschachtDevGitHubActions', {
+      githubOrg: 'feuerstein-org',
+      githubRepo: 'bergschacht',
+      githubEnvironment: 'dev',
+      lookupAccountIds: [
+        [cicdAccountId, 'CICD'],
+        [devAccountId, 'Dev'],
+        [prodAccountId, 'Prod'],
+      ],
+      githubOidcProvider: githubOidcProviderStack.provider,
+      env: { account: cicdAccountId, region: awsRegion },
+    });
+
+    // GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy artifacts and trigger pipeline
+    new GitHubActionsStack(this, 'FeuersteinBergschachtProdGitHubActions', {
+      githubOrg: 'feuerstein-org',
+      githubRepo: 'bergschacht',
+      githubEnvironment: 'prod',
+      lookupAccountIds: [
+        [cicdAccountId, 'CICD'],
+        [devAccountId, 'Dev'],
+        [prodAccountId, 'Prod'],
+      ],
+      githubOidcProvider: githubOidcProviderStack.provider,
+      additionalPolicies: [
+        // Permission to trigger the CDK production pipeline
+        new iam.PolicyStatement({
+          sid: 'AllowTriggerProductionPipeline',
+          effect: iam.Effect.ALLOW,
+          actions: ['codepipeline:StartPipelineExecution'],
+          resources: [
+            `arn:aws:codepipeline:${awsRegion}:${cicdAccountId}:BergschachtProductionPipeline`,
+          ],
+        }),
+        // Permission to push images to ECR
+        new iam.PolicyStatement({
+          sid: 'AllowEcrAuth',
+          effect: iam.Effect.ALLOW,
+          actions: ['ecr:GetAuthorizationToken'],
+          resources: ['*'],
+        }),
+        new iam.PolicyStatement({
+          sid: 'AllowEcrPush',
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'ecr:BatchCheckLayerAvailability',
+            'ecr:GetDownloadUrlForLayer',
+            'ecr:BatchGetImage',
+            'ecr:PutImage',
+            'ecr:InitiateLayerUpload',
+            'ecr:UploadLayerPart',
+            'ecr:CompleteLayerUpload',
+          ],
+          resources: [`arn:aws:ecr:${awsRegion}:${cicdAccountId}:repository/feuerstein`],
+        }),
+        // Permission to upload Lambda artifacts to S3
+        new iam.PolicyStatement({
+          sid: 'AllowS3LambdaArtifactsUpload',
+          effect: iam.Effect.ALLOW,
+          actions: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
+          resources: [
+            'arn:aws:s3:::example-lambda-artifacts',
+            'arn:aws:s3:::example-lambda-artifacts/*',
+          ],
+        }),
+        // Permission to use the KMS key for encryption
+        new iam.PolicyStatement({
+          sid: 'AllowKmsForDeploymentResources',
+          effect: iam.Effect.ALLOW,
+          actions: ['kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey*'],
+          resources: [deploymentResourcesKmsKeyStack.key.keyArn],
+        }),
+      ],
+      env: { account: cicdAccountId, region: awsRegion },
+    });
+
+    // Create SNS PagerDuty topic for CICD account
+    const snsPagerDutyStack = new SnsPagerDutyStack(this, 'SnsPagerDuty', {
+      topicName: 'PagerDutyAlertsCicd',
+      emailAddress: pagerDutyEmail,
+      env: { account: cicdAccountId, region: awsRegion },
+    });
 
     // Create centralized logging bucket for CI/CD account
     const centralLoggingBucket = new CentralLoggingBucketStack(this, 'CentralLoggingBucket', {

@@ -15,14 +15,56 @@ repos:
   # ESLint and Prettier
   - repo: local
     hooks:
-      - id: format
-        name: format
+      - id: prettier
+        name: prettier
         entry: 'pnpm run format'
         language: system
         args: ['--write']
 
-      - id: lint
-        name: lint
+      - id: eslint
+        name: eslint
         entry: 'pnpm run lint'
         language: system
-        args: ['--fix']
+        pass_filenames: false
+
+      - id: validate-version-manifests
+        name: validate version manifests
+        entry: bash -c 'find version-manifests/ -name "*.json" ! -name "*.schema.json" -exec ajv validate -s version-manifests/version-manifest.schema.json -d {} --spec=draft2020 \;'
+        language: system
+        pass_filenames: false
+
+      - id: printf-log-formatter
+        name: printf-log-formatter
+        entry: uv run printf-log-formatter
+        language: system
+        types: [python]
+        args:
+          - --log-level=debug
+
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        types: [python]
+
+      - id: ruff-check
+        name: ruff-check
+        entry: uv run ruff check
+        language: system
+        types: [python]
+        args: [--fix]
+
+      - id: ruff-format
+        name: ruff-format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+
+      - id: pyupgrade
+        name: pyupgrade
+        entry: uv run pyupgrade
+        language: system
+        types: [python]
+        args: ['--py314-plus']
+
+  # Check Dockerfile exists for each Python package -- add this if package uses Docker
