@@ -25,7 +25,7 @@ run = "pnpm --filter cdk run build"
 
 [tasks.cdk-diff-ci]
 description = "Build & see diff for stacks (defaults to all with '**', or pass stack names)"
-depends = ["cdk-build"]
+depends = ["cdk-build-ci"]
 usage = 'arg "[stacks]..." help="Stack names to diff (defaults to ** for all)"'
 run = '''
 stacks="${usage_stacks:-**}"
