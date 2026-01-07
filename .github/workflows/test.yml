@@ -32,7 +32,48 @@ jobs:
       - name: Pre-commit
         run: mise run pre-commit-ci
 
-  test:
+  discover-python-packages:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.list-packages.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List all Python packages
+        id: list-packages
+        run: |
+          packages="[]"
+          for dir in packages/*/; do
+            if [ -f "$dir/pyproject.toml" ]; then
+              pkg=$(basename "$dir")
+              packages=$(echo "$packages" | jq -c ". += [\"$pkg\"]")
+            fi
+          done
+          echo "packages=$packages" >> $GITHUB_OUTPUT
+          echo "Found packages: $packages"
+
+  test-python-packages:
+    runs-on: ubuntu-latest
+    needs: discover-python-packages
+    if: needs.discover-python-packages.outputs.packages != '[]'
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.discover-python-packages.outputs.packages) }}
+      fail-fast: false
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: mise run install-ci
+
+      - name: Test Python package - ${{ matrix.package }}
+        run: mise run py-test-ci ${{ matrix.package }}
+
+  test-cdk:
     runs-on: ubuntu-latest
     environment: dev
     steps:
@@ -50,9 +91,6 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Test-${{ github.run_id }}
-
-      - name: Test Python
-        run: mise run py-test-ci
 
       - name: Build CDK
         run: mise run cdk-build-ci
