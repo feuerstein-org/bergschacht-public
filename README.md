@@ -304,9 +304,12 @@ Runs only on push to `master` and handles the full deployment pipeline:
 
 ### Change Detection
 
-The workflow automatically detects which packages have changed using [dorny/paths-filter](https://github.com/dorny/paths-filter):
+The workflow automatically detects which packages and CDK code have changed using [dorny/paths-filter](https://github.com/dorny/paths-filter):
 
-Only packages with actual file changes are built and deployed.
+- **Package changes**: Detects changes in `packages/*/` directories
+- **CDK changes**: Detects changes in `cdk/` directory or `version-manifests/latest.json`
+
+Only packages with actual file changes are built and deployed. The CDK pipeline only triggers if CDK code changed or packages were deployed.
 
 ### Helper Scripts
 
@@ -364,11 +367,18 @@ chore: update package versions [skip ci]
 
 #### 4. Trigger CDK Pipeline (`deploy-cdk` job)
 
-Finally, triggers the AWS CodePipeline to deploy infrastructure:
+Conditionally triggers the AWS CodePipeline to deploy infrastructure:
 
 ```bash
 aws codepipeline start-pipeline-execution --name BergschachtProductionPipeline
 ```
+
+The CDK pipeline only runs when:
+
+- CDK code changes are detected (files in `cdk/` or `version-manifests/latest.json`), OR
+- Packages were successfully deployed (indicated by `commit-manifest` job success)
+
+This optimization prevents unnecessary pipeline executions when only documentation or workflow files change.
 
 The CDK pipeline reads `version-manifests/latest.json` to determine which artifact versions to deploy.
 
@@ -441,7 +451,7 @@ After initial deployment, the pipelines are self-mutating and will update themse
 
 ## Stacks
 
-### GitHubOIDCProviderCicd
+### GitHubOIDCProvider
 
 This stack creates the GitHub OIDC provider in the CI/CD account:
 

@@ -50,7 +50,7 @@ export class CicdStage extends cdk.Stage {
     const { cicdAccountId, devAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
 
     // GitHub OIDC Provider Stack - creates the OIDC provider once per account
-    const githubOidcProviderStack = new GitHubOIDCProviderStack(this, 'GitHubOIDCProviderCicd', {
+    const githubOidcProviderStack = new GitHubOIDCProviderStack(this, 'GitHubOIDCProvider', {
       env: { account: cicdAccountId, region: awsRegion },
     });
 

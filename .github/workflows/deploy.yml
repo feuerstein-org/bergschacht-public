@@ -21,6 +21,7 @@ jobs:
       docker_packages: ${{ steps.categorize.outputs.docker_packages }}
       lambda_packages: ${{ steps.categorize.outputs.lambda_packages }}
       package_versions: ${{ steps.categorize.outputs.package_versions }}
+      cdk_changed: ${{ steps.cdk-filter.outputs.cdk }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +46,15 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: ${{ steps.generate-filters.outputs.filters }}
+
+      - name: Detect CDK changes
+        id: cdk-filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cdk:
+              - 'cdk/**'
+              - 'version-manifests/latest.json'
 
       - name: Categorize packages by deployment type
         id: categorize
@@ -385,13 +395,14 @@ jobs:
   deploy-cdk:
     runs-on: ubuntu-latest
     needs: [detect-changes, create-tags, deploy-docker, deploy-lambda, commit-manifest]
-    # Run if no deploy jobs failed (allows skipping)
+    # Run if no deploy jobs failed (allows skipping) AND (CDK changed OR packages were deployed)
     if: |
       always() &&
       (needs.create-tags.result == 'success' || needs.create-tags.result == 'skipped') &&
       (needs.deploy-docker.result == 'success' || needs.deploy-docker.result == 'skipped') &&
       (needs.deploy-lambda.result == 'success' || needs.deploy-lambda.result == 'skipped') &&
-      (needs.commit-manifest.result == 'success' || needs.commit-manifest.result == 'skipped')
+      (needs.commit-manifest.result == 'success' || needs.commit-manifest.result == 'skipped') &&
+      (needs.detect-changes.outputs.cdk_changed == 'true' || needs.commit-manifest.result == 'success')
     environment:
       name: prod
     steps:
