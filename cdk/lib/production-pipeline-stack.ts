@@ -61,7 +61,7 @@ export class ProductionPipelineStack extends cdk.Stack {
     const branch = props.branch ?? 'master';
 
     // Create the CodePipeline V2 pipeline
-    const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipeline', {
+    const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineProduction', {
       pipelineName: 'BergschachtProductionPipeline',
       pipelineType: codepipeline.PipelineType.V2,
       // Cross-account keys are required for cross-account deployments

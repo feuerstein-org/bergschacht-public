@@ -50,7 +50,7 @@ export class DevelopmentPipelineStack extends cdk.Stack {
     super(scope, id, props);
 
     // Create the CodePipeline V2 pipeline
-    const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipeline', {
+    const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineDevelopment', {
       pipelineName: 'BergschachtDevelopmentPipeline',
       pipelineType: codepipeline.PipelineType.V2,
       crossAccountKeys: true, // Required for cross-account deployments
