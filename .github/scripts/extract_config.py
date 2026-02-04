@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tomllib
+from pathlib import Path
 
 
 def main() -> int:
@@ -14,9 +15,9 @@ def main() -> int:
     parser.add_argument("package", help="Package name (directory under packages/)")
     args = parser.parse_args()
 
-    pyproject_path = f"packages/{args.package}/pyproject.toml"
+    pyproject_path = Path("packages") / args.package / "pyproject.toml"
 
-    with open(pyproject_path, "rb") as f:
+    with pyproject_path.open("rb") as f:
         config = tomllib.load(f)
 
     # Extract version (required)
@@ -34,7 +35,7 @@ def main() -> int:
         print("GITHUB_OUTPUT not set, printing values only")
         return 0
 
-    with open(github_output, "a") as f:
+    with Path(github_output).open("a") as f:
         f.write(f"version={version}\n")
         f.write(f"deploy_types={json.dumps(deploy_types)}\n")
 

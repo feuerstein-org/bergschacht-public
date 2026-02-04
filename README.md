@@ -133,6 +133,7 @@ lambda_function_name = "my-lambda-function"
 3. Add deployment configuration in `[tool.bergschacht]`:
    - For Docker: Add a `Dockerfile` for containerization (see note below)
    - For Lambda: Specify `lambda_function_name` (the Lambda function must be created and configured via CDK in `cdk/lib/`)
+4. Update the main `pyproject.toml` to have your package listed in the `executionEnvironments` to avoid Pyright issues.
 
 The deployment workflow will automatically detect the deployment type and handle the build/deploy accordingly.
 

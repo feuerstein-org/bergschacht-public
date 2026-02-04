@@ -33,14 +33,6 @@ repos:
         language: system
         pass_filenames: false
 
-      - id: printf-log-formatter
-        name: printf-log-formatter
-        entry: uv run printf-log-formatter
-        language: system
-        types: [python]
-        args:
-          - --log-level=debug
-
       - id: pyright
         name: pyright
         entry: uv run pyright

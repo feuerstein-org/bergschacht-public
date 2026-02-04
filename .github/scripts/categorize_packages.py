@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tomllib
+from pathlib import Path
 
 
 def main() -> int:
@@ -20,8 +21,8 @@ def main() -> int:
     package_versions: dict[str, str] = {}
 
     for pkg in changed:
-        pyproject_path = f"packages/{pkg}/pyproject.toml"
-        with open(pyproject_path, "rb") as f:
+        pyproject_path = Path("packages") / pkg / "pyproject.toml"
+        with pyproject_path.open("rb") as f:
             config = tomllib.load(f)
 
         version = config["project"]["version"]
@@ -43,7 +44,7 @@ def main() -> int:
         print("GITHUB_OUTPUT not set, printing values only")
         return 0
 
-    with open(github_output, "a") as f:
+    with Path(github_output).open("a") as f:
         f.write(f"docker_packages={json.dumps(docker_packages)}\n")
         f.write(f"lambda_packages={json.dumps(lambda_packages)}\n")
         f.write(f"package_versions={json.dumps(package_versions)}\n")

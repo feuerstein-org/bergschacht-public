@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 # Type alias for the manifest structure
 type Manifest = dict[str, Any]
 
@@ -38,10 +37,11 @@ def is_newer_version(new_version: str, current_version: str | None) -> bool:
     try:
         new_parsed = parse_version(new_version)
         current_parsed = parse_version(current_version)
-        return new_parsed > current_parsed
     except ValueError:
         print(f"Warning: Could not parse versions ({new_version}, {current_version}), treating as older")
         return False
+    else:
+        return new_parsed > current_parsed
 
 
 def update_manifest_docker(
@@ -64,7 +64,8 @@ def update_manifest_docker(
 
     if not is_newer_version(version, current_version):
         print(
-            f"Skipping {package_name} (image): deployed version {version} is not newer than manifest version {current_version}"
+            f"Skipping {package_name} (image): deployed version {version} is not newer than "
+            f"manifest version {current_version}"
         )
         return False
 
@@ -98,7 +99,8 @@ def update_manifest_lambda(
 
     if not is_newer_version(version, current_version):
         print(
-            f"Skipping {package_name} (lambda): deployed version {version} is not newer than manifest version {current_version}"
+            f"Skipping {package_name} (lambda): deployed version {version} is not newer than "
+            f"manifest version {current_version}"
         )
         return False
 
@@ -115,13 +117,17 @@ def update_manifest_lambda(
 def main() -> int:
     """Update version manifest with deployment info."""
     parser = argparse.ArgumentParser(description="Update version manifest after package deployment")
-    parser.add_argument("--manifest-path", default="version-manifests/latest.json", help="Path to manifest file")
+    parser.add_argument(
+        "--manifest-path",
+        default=str(Path("version-manifests") / "latest.json"),
+        help="Path to manifest file",
+    )
     parser.add_argument("--from-metadata", required=True, help="Path to metadata JSON file")
 
     args = parser.parse_args()
 
     # Load metadata from file
-    with open(args.from_metadata) as f:
+    with Path(args.from_metadata).open() as f:
         metadata = json.load(f)
 
     # Validate required fields
@@ -147,7 +153,7 @@ def main() -> int:
     # Load existing manifest
     manifest: Manifest
     if manifest_path.exists():
-        with open(manifest_path) as f:
+        with manifest_path.open() as f:
             manifest = json.load(f)
     else:
         manifest = {
@@ -185,7 +191,7 @@ def main() -> int:
     # Write output for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
-        with open(github_output, "a") as f:
+        with Path(github_output).open("a") as f:
             f.write(f"updated={'true' if updated else 'false'}\n")
 
     if not updated:
@@ -193,7 +199,7 @@ def main() -> int:
         return 0
 
     # Write updated manifest
-    with open(manifest_path, "w") as f:
+    with manifest_path.open("w") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
 
