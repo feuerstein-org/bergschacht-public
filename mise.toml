@@ -2,98 +2,55 @@
 pnpm = "latest"
 pre-commit = "latest"
 node = "24"
-python = "3.14"
-uv = "latest"
 
 [tasks.install]
 description = "Install all dependencies"
 run = [
     "pnpm install",
-    "pre-commit install",
-    "uv sync --all-extras --dev",
+    "pre-commit install"
 ]
 
 [tasks.pre-commit]
 description = "Run pre-commit hooks on all files"
 run = "pre-commit run --all-files"
 
-# Python tasks
-[tasks.py-lint]
-description = "Show all issues detected by Python linter"
-run = [
-    "uv run ruff check .",
-    "uv run ruff format . --check",
-]
+[tasks.build]
+description = "Build"
+run = "pnpm run build"
 
-[tasks.py-lint-fix]
-description = "Fix all auto-fixable Python linting issues"
-run = [
-    "uv run ruff check --fix .",
-    "uv run ruff format .",
-]
-
-[tasks.py-test]
-description = "Run tests with coverage (optionally for a specific package)"
-usage = '''
-arg "[package]" help="Package to run tests for (runs all if omitted)"
-'''
-run = '''
-if [ -z "${usage_package:-}" ]; then
-    echo "Running tests for all packages..."
-    for dir in packages/*/; do
-        if [ -f "$dir/pyproject.toml" ]; then
-            pkg=$(basename "$dir")
-            echo "Testing package: $pkg"
-            uv run --package "$pkg" coverage run -m pytest "packages/$pkg/tests" || exit 1
-            uv run --package "$pkg" coverage report --fail-under=80 || exit 1
-        fi
-    done
-else
-    echo "Running tests for package: ${usage_package}"
-    uv run --package ${usage_package} coverage run -m pytest "packages/${usage_package}/tests"
-    uv run --package ${usage_package} coverage report --fail-under=80
-fi
-'''
-
-
-# CDK tasks
-[tasks.cdk-build]
-description = "Build CDK"
-run = "pnpm --filter cdk run build"
-
-[tasks.cdk-test]
+[tasks.test]
 description = "Build & run tests on all files"
-depends = ["cdk-build"]
-run = "pnpm --filter cdk run test"
+depends = ["build"]
+run = "pnpm run test"
 
-[tasks.cdk-test-full]
+[tasks.test-full]
 description = "Build & run full test suite & synth all stack, pass a stack name to see the CFN"
-depends = ["cdk-test", "pre-commit"]
-run = "pnpm --filter cdk run cdk synth"
+depends = ["test", "pre-commit"]
+run = "pnpm run cdk synth"
 
-[tasks.cdk-synth]
+[tasks.synth]
 description = "Build & synthesize stacks (defaults to all with '**', or pass stack names)"
-depends = ["cdk-build"]
+depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to synth (defaults to ** for all)"'
 run = '''
 stacks="${usage_stacks:-**}"
-pnpm --filter cdk run cdk synth "$stacks"
+pnpm run cdk synth "$stacks"
 '''
 
-[tasks.cdk-diff]
+[tasks.diff]
 description = "Build & see diff for stacks (defaults to all with '**', or pass stack names)"
-depends = ["cdk-build"]
+depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to diff (defaults to ** for all)"'
 run = '''
 stacks="${usage_stacks:-**}"
-pnpm --filter cdk run cdk diff "$stacks"
+pnpm run cdk diff "$stacks"
 '''
 
-[tasks.cdk-deploy]
+[tasks.deploy]
 description = "Deploy stacks (defaults to all with '**', or pass stack names)"
-depends = ["cdk-build"]
+depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to deploy (defaults to ** for all)"'
 run = '''
 stacks="${usage_stacks:-**}"
-pnpm --filter cdk run cdk deploy "$stacks"
+pnpm run cdk deploy "$stacks"
 '''

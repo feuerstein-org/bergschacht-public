@@ -1,19 +1,24 @@
 {
   "$schema": "./version-manifest.schema.json",
-  "schemaVersion": "1.0.0",
-  "packages": {
-    "sample_etl": {
-      "image": {
-        "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-        "imageTag": "bergschacht-sample_etl-0.1.0",
-        "version": "0.1.0",
-        "commitSha": "d2fac7a49eaad0929f499f4a5ef6b8424628965e"
+  "schemaVersion": "2.0.0",
+  "repositories": {
+    "sample-python-repo": {
+      "source": "feuerstein/sample-python-repo",
+      "images": {
+        "sample-python-repo": {
+          "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+          "imageTag": "sample-python-repo-0.1.0",
+          "version": "0.1.0",
+          "commitSha": "d2fac7a49eaad0929f499f4a5ef6b8424628965e"
+        }
       },
-      "lambda": {
-        "bucket": "example-lambda-artifacts",
-        "key": "bergschacht/sample_etl/sample_etl.zip",
-        "version": "0.1.0",
-        "commitSha": "d2fac7a49eaad0929f499f4a5ef6b8424628965e"
+      "lambdas": {
+        "sample-python-repo": {
+          "bucket": "example-lambda-artifacts",
+          "key": "sample-python-repo/sample-python-repo-0.1.0.zip",
+          "version": "0.1.0",
+          "commitSha": "d2fac7a49eaad0929f499f4a5ef6b8424628965e"
+        }
       }
     }
   }

@@ -10,6 +10,8 @@ import { EcrStack } from '../ecr-stack';
 import { SnsPagerDutyStack } from '../sns-pager-duty';
 import { GitHubOIDCProviderStack } from '../github-oidc-provider-stack';
 import { GitHubActionsStack } from '../github-actions-stack';
+import { createApplicationRepoGitHubActions } from '../application-repo-github-actions-stack';
+import { ApplicationRepo } from '../constants';
 
 export interface CicdStageProps extends cdk.StageProps {
   /**
@@ -32,6 +34,11 @@ export interface CicdStageProps extends cdk.StageProps {
    * Email address for PagerDuty alerts
    */
   readonly pagerDutyEmail: string;
+  /**
+   * Application repositories that get scoped artifact-push permissions.
+   * @default []
+   */
+  readonly applicationRepos?: ApplicationRepo[];
 }
 
 /**
@@ -48,6 +55,7 @@ export class CicdStage extends cdk.Stage {
     cdk.Aspects.of(this).add(new AwsSolutionsChecks({ verbose: true }));
 
     const { cicdAccountId, devAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
+    const appRepos = props.applicationRepos ?? [];
 
     // GitHub OIDC Provider Stack - creates the OIDC provider once per account
     const githubOidcProviderStack = new GitHubOIDCProviderStack(this, 'GitHubOIDCProvider', {
@@ -162,7 +170,7 @@ export class CicdStage extends cdk.Stage {
     });
 
     // Deploy Lambda Artifacts S3 bucket in CI/CD account with shared KMS key
-    new LambdaArtifactsStack(this, 'LambdaArtifacts', {
+    const lambdaArtifactsStack = new LambdaArtifactsStack(this, 'LambdaArtifacts', {
       bucketName: 'example-lambda-artifacts',
       allowedAccountIds: [devAccountId, prodAccountId],
       encryptionKey: deploymentResourcesKmsKeyStack.key,
@@ -171,12 +179,25 @@ export class CicdStage extends cdk.Stage {
     });
 
     // Deploy central ECR Stack in CI/CD account with shared KMS key
-    new EcrStack(this, 'FeuersteinEcr', {
+    const ecrStack = new EcrStack(this, 'FeuersteinEcr', {
       repositoryName: 'feuerstein',
       notificationTopic: snsPagerDutyStack.topic,
       allowedPullAccountIds: [devAccountId, prodAccountId],
       encryptionKey: deploymentResourcesKmsKeyStack.key,
       env: { account: cicdAccountId, region: awsRegion },
     });
+
+    // Create scoped GitHub Actions roles for each application repository
+    for (const appRepo of appRepos) {
+      createApplicationRepoGitHubActions(this, {
+        appRepo,
+        githubOidcProvider: githubOidcProviderStack.provider,
+        cicdAccountId,
+        awsRegion,
+        ecrRepository: ecrStack.repository,
+        lambdaArtifactsBucket: lambdaArtifactsStack.bucket,
+        deploymentResourcesKmsKey: deploymentResourcesKmsKeyStack.key,
+      });
+    }
   }
 }

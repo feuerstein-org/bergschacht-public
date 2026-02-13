@@ -5,48 +5,23 @@
 pnpm = "latest"
 pre-commit = "latest"
 node = "24"
-python = "3.14"
-uv = "latest"
 
 [tasks.install-ci]
 description = "Install dependencies for CI"
-run = [
-    "pnpm install",
-    "uv sync --all-extras --dev",
-]
+run = "pnpm install"
 
 [tasks.pre-commit-ci]
 description = "Run pre-commit hooks (CI only)"
 run = "pre-commit run --all-files"
 
-[tasks.cdk-build-ci]
-description = "Build CDK for CI"
-run = "pnpm --filter cdk run build"
+[tasks.build-ci]
+description = "Build for CI"
+run = "pnpm run build"
 
-[tasks.cdk-diff-ci]
-description = "Build & see diff for stacks (defaults to all with '**', or pass stack names)"
-depends = ["cdk-build-ci"]
-usage = 'arg "[stacks]..." help="Stack names to diff (defaults to ** for all)"'
-run = '''
-stacks="${usage_stacks:-**}"
-pnpm --filter cdk run cdk diff "$stacks"
-'''
+[tasks.diff-ci]
+description = "See diff for all stacks, pass a stack name to filter"
+run = "pnpm run cdk diff"
 
-[tasks.cdk-test-ci]
-description = "Run CDK tests for CI"
-run = "pnpm --filter cdk run test"
-
-[tasks.py-test-ci]
-description = "Run tests with coverage in CI for a specific package"
-usage = '''
-arg "[package]" help="Package to run tests for"
-'''
-run = '''
-if [ -z "${usage_package:-}" ]; then
-    echo "Error: No package specified. Please provide a package name." >&2
-    exit 1
-fi
-echo "Running tests for package: ${usage_package}"
-uv run --package ${usage_package} coverage run -m pytest
-uv run --package ${usage_package} coverage report --fail-under=80
-'''
+[tasks.test-ci]
+description = "Run test-suite"
+run = "pnpm run test"

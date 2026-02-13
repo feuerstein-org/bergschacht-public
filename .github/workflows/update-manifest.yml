@@ -1,0 +1,70 @@
+name: Update Version Manifest
+
+on:
+  repository_dispatch:
+    types: [update-manifest]
+
+# Concurrency: serialize manifest updates to avoid conflicts
+concurrency:
+  group: update-manifest
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Write deployment metadata
+        run: |
+          echo '${{ toJson(github.event.client_payload) }}' > /tmp/metadata.json
+          echo "Received metadata:"
+          cat /tmp/metadata.json
+
+      - name: Update version manifest
+        id: update
+        run: |
+          python3 .github/scripts/update_version_manifest.py \
+            --from-metadata /tmp/metadata.json
+
+      - name: Commit and push manifest update
+        if: steps.update.outputs.updated == 'true'
+        env:
+          REPO_NAME: ${{ github.event.client_payload.repoName }}
+          COMMIT_SHA: ${{ github.event.client_payload.commitSha }}
+          SOURCE_REPO: ${{ github.event.client_payload.sourceRepo }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add version-manifests/latest.json
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          # Build a summary of deployed artifact versions
+          VERSIONS=$(echo '${{ toJson(github.event.client_payload.artifacts) }}' \
+            | jq -r '.[] | "\(.name)@\(.version)"' | paste -sd ', ')
+
+          git commit -m "chore: update ${REPO_NAME} artifacts (${VERSIONS})
+
+          Triggered by: https://github.com/${SOURCE_REPO}/commit/${COMMIT_SHA}"
+
+          # Retry push with rebase in case of concurrent updates
+          for i in {1..5}; do
+            if git push; then
+              echo "Successfully pushed manifest update"
+              break
+            else
+              echo "Push failed, retrying in $((i * 2)) seconds..."
+              sleep $((i * 2))
+              git pull --rebase origin master
+            fi
+          done

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Version Manifest Schema",
-  "description": "Schema for managing package versions with multiple deployment types per package",
+  "description": "Schema for managing artifact versions per repository with multiple named artifacts (images and lambdas) per repository",
   "type": "object",
-  "required": ["schemaVersion", "packages"],
+  "required": ["schemaVersion", "repositories"],
   "properties": {
     "$schema": {
       "type": "string",
@@ -14,24 +14,40 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
       "description": "Semantic version of the manifest schema"
     },
-    "packages": {
+    "repositories": {
       "type": "object",
-      "description": "Map of package names to their deployment configurations",
+      "description": "Map of repository names to their deployment configurations",
       "patternProperties": {
         "^[a-zA-Z0-9-_]+$": {
           "type": "object",
-          "description": "Package with one or more deployment types",
+          "description": "Repository with one or more named artifacts",
+          "required": ["source"],
           "properties": {
-            "lambda": {
-              "$ref": "#/$defs/lambdaArtifact",
-              "description": "Lambda deployment configuration"
+            "source": {
+              "type": "string",
+              "description": "Source repository (owner/repo) that produces this package"
             },
-            "image": {
-              "$ref": "#/$defs/containerArtifact",
-              "description": "Container image deployment configuration"
+            "images": {
+              "type": "object",
+              "description": "Map of named container image artifacts",
+              "patternProperties": {
+                "^[a-zA-Z0-9-_]+$": {
+                  "$ref": "#/$defs/containerArtifact"
+                }
+              },
+              "additionalProperties": false
+            },
+            "lambdas": {
+              "type": "object",
+              "description": "Map of named Lambda artifacts",
+              "patternProperties": {
+                "^[a-zA-Z0-9-_]+$": {
+                  "$ref": "#/$defs/lambdaArtifact"
+                }
+              },
+              "additionalProperties": false
             }
           },
-          "minProperties": 1,
           "additionalProperties": false
         }
       },
@@ -54,7 +70,7 @@
         },
         "version": {
           "type": "string",
-          "description": "Semantic version of the package"
+          "description": "Semantic version of the artifact"
         },
         "commitSha": {
           "type": "string",
@@ -78,7 +94,7 @@
         },
         "version": {
           "type": "string",
-          "description": "Semantic version of the package"
+          "description": "Semantic version of the artifact"
         },
         "commitSha": {
           "type": "string",

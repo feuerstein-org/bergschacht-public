@@ -12,6 +12,7 @@ import {
   githubConnectionArn,
   githubOrg,
   githubRepo,
+  applicationRepos,
 } from '../lib/constants';
 
 const app = new cdk.App();
@@ -34,6 +35,7 @@ new ProductionPipelineStack(app, 'ProductionPipeline', {
   prodAccountId: prodAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
+  applicationRepos: applicationRepos,
   env: { account: cicdAccount, region: awsRegion },
   description: 'CDK Pipeline for production deployments',
 });

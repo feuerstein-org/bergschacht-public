@@ -11,7 +11,7 @@ export interface LambdaArtifactConfig {
   bucket: string;
   /** S3 object key (path to zip file) */
   key: string;
-  /** Semantic version of the package */
+  /** Semantic version of the artifact */
   version: string;
   /** Git commit SHA that produced this artifact (7-40 chars) */
   commitSha: string;
@@ -25,21 +25,23 @@ export interface ContainerArtifactConfig {
   repository: string;
   /** Docker image tag */
   imageTag: string;
-  /** Semantic version of the package */
+  /** Semantic version of the artifact */
   version: string;
   /** Git commit SHA that produced this image (7-40 chars) */
   commitSha: string;
 }
 
 /**
- * Package with one or more deployment types.
- * A package can have lambda, image, or both deployment configurations.
+ * Repository with one or more named artifacts.
+ * Each artifact type (images, lambdas) is a map of artifact name to config.
  */
-export interface Package {
-  /** Lambda deployment configuration */
-  lambda?: LambdaArtifactConfig;
-  /** Container image deployment configuration */
-  image?: ContainerArtifactConfig;
+export interface Repository {
+  /** Source repository (owner/repo) that produces this package */
+  source: string;
+  /** Named Lambda deployment configurations */
+  lambdas?: Record<string, LambdaArtifactConfig>;
+  /** Named container image deployment configurations */
+  images?: Record<string, ContainerArtifactConfig>;
 }
 
 /**
@@ -50,24 +52,24 @@ export interface VersionManifest {
   $schema?: string;
   /** Semantic version of the manifest schema */
   schemaVersion: string;
-  /** Map of package names to their configurations */
-  packages: Record<string, Package>;
+  /** Map of repository names to their configurations */
+  repositories: Record<string, Repository>;
 }
 
 /**
- * Check if a package has a Lambda deployment
+ * Check if a repository has any Lambda deployments
  */
 export function hasLambdaDeployment(
-  pkg: Package
-): pkg is Package & { lambda: LambdaArtifactConfig } {
-  return pkg.lambda !== undefined;
+  repo: Repository
+): repo is Repository & { lambdas: Record<string, LambdaArtifactConfig> } {
+  return repo.lambdas !== undefined && Object.keys(repo.lambdas).length > 0;
 }
 
 /**
- * Check if a package has a container image deployment
+ * Check if a repository has any container image deployments
  */
 export function hasImageDeployment(
-  pkg: Package
-): pkg is Package & { image: ContainerArtifactConfig } {
-  return pkg.image !== undefined;
+  repo: Repository
+): repo is Repository & { images: Record<string, ContainerArtifactConfig> } {
+  return repo.images !== undefined && Object.keys(repo.images).length > 0;
 }

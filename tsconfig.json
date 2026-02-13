@@ -20,7 +20,8 @@
     "strictPropertyInitialization": false,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "typeRoots": ["./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types"],
+    "types": ["jest", "node"]
   },
   "exclude": ["node_modules", "cdk.out"]
 }

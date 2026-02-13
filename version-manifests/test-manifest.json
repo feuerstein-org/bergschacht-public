@@ -1,43 +1,82 @@
 {
   "$schema": "./version-manifest.schema.json",
-  "schemaVersion": "1.0.0",
-  "packages": {
+  "schemaVersion": "2.0.0",
+  "repositories": {
     "order-processor": {
-      "lambda": {
-        "bucket": "my-artifacts-bucket",
-        "key": "lambdas/order-processor/v1.2.3.zip",
-        "version": "1.2.3",
-        "commitSha": "abc1234"
+      "source": "feuerstein/order-processor",
+      "lambdas": {
+        "order-processor": {
+          "bucket": "my-artifacts-bucket",
+          "key": "lambdas/order-processor/v1.2.3.zip",
+          "version": "1.2.3",
+          "commitSha": "abc1234"
+        }
       }
     },
     "payment-service": {
-      "image": {
-        "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/payment-service",
-        "imageTag": "v2.0.1",
-        "version": "2.0.1",
-        "commitSha": "789abcd"
+      "source": "feuerstein/payment-service",
+      "images": {
+        "payment-service": {
+          "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/payment-service",
+          "imageTag": "v2.0.1",
+          "version": "2.0.1",
+          "commitSha": "789abcd"
+        }
       }
     },
     "api-gateway": {
-      "image": {
-        "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/api-gateway",
-        "imageTag": "v3.1.0",
-        "version": "3.1.0",
-        "commitSha": "e5f6a7b8"
+      "source": "feuerstein/api-gateway",
+      "images": {
+        "api-gateway": {
+          "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/api-gateway",
+          "imageTag": "v3.1.0",
+          "version": "3.1.0",
+          "commitSha": "e5f6a7b8"
+        }
       }
     },
     "dual-deploy-service": {
-      "lambda": {
-        "bucket": "my-artifacts-bucket",
-        "key": "lambdas/dual-deploy-service/v1.0.0.zip",
-        "version": "1.0.0",
-        "commitSha": "deadbeef"
+      "source": "feuerstein/dual-deploy-service",
+      "lambdas": {
+        "dual-deploy-service": {
+          "bucket": "my-artifacts-bucket",
+          "key": "lambdas/dual-deploy-service/v1.0.0.zip",
+          "version": "1.0.0",
+          "commitSha": "deadbeef"
+        }
       },
-      "image": {
-        "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/dual-deploy-service",
-        "imageTag": "v1.0.0",
-        "version": "1.0.0",
-        "commitSha": "deadbeef"
+      "images": {
+        "dual-deploy-service": {
+          "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/dual-deploy-service",
+          "imageTag": "v1.0.0",
+          "version": "1.0.0",
+          "commitSha": "deadbeef"
+        }
+      }
+    },
+    "multi-artifact-service": {
+      "source": "feuerstein/multi-artifact-service",
+      "images": {
+        "worker": {
+          "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/multi-artifact-service",
+          "imageTag": "worker-1.0.0",
+          "version": "1.0.0",
+          "commitSha": "cafe1234"
+        },
+        "api": {
+          "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/multi-artifact-service",
+          "imageTag": "api-1.0.0",
+          "version": "1.0.0",
+          "commitSha": "cafe1234"
+        }
+      },
+      "lambdas": {
+        "webhook": {
+          "bucket": "my-artifacts-bucket",
+          "key": "lambdas/multi-artifact-service/webhook-1.0.0.zip",
+          "version": "1.0.0",
+          "commitSha": "cafe1234"
+        }
       }
     }
   }

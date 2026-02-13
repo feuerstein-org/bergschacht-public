@@ -1,5 +1,6 @@
 // eslint.config.mjs
 import { defineConfig } from 'eslint/config';
+import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import cdkPlugin from 'eslint-plugin-awscdk';
 import jsdoc from 'eslint-plugin-jsdoc';
@@ -10,7 +11,7 @@ export default defineConfig([
   },
   {
     files: ['**/*.ts'],
-    extends: [...tseslint.configs.recommended],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
   },
   {
     ...cdkPlugin.configs.strict,

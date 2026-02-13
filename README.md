@@ -1,40 +1,60 @@
 # Bergschacht
 
-This Monorepo deploys all of Feuersteins infrastructure and package code. Deployments are done using GitHub Actions (CI) + CDK Pipelines (CD). Packages live in the `packages` directory and CDK code lives in `cdk` directory.
+CDK infrastructure for Feuerstein. Application packages live in separate repositories and deploy their artifacts (Docker images, Lambda packages) to AWS. After deployment, they send a `repository_dispatch` event to this repo, which updates the version manifest and triggers a CDK deployment. This documentation describes how the application code is deployed as well.
+
+## Architecture
+
+```
+┌─────────────────────────┐     ┌─────────────────────────┐
+│    Application Repo     │     │    Application Repo     │
+│    (myapp-repo, etc)    │     │    (other apps...)      │
+└───────────┬─────────────┘     └───────────┬─────────────┘
+            │                               │
+            │ 1. Deploy Docker/Lambda       │
+            │ 2. repository_dispatch        │
+            │                               │
+            ▼                               ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Bergschacht (CDK Repo)                 │
+│                                                         │
+│  update-manifest.yml                                    │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ 1. Run update_version_manifest.py (version check)│   │
+│  │ 2. Commit updated latest.json                    │   │
+│  └──────────────────┬───────────────────────────────┘   │
+│                     │ push to master                    │
+│                     ▼                                   │
+│  deploy.yml                                             │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ Trigger CDK Pipeline                             │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Project Structure
 
 ```
 bergschacht/
-├── package.json                             # JS Workspace config
-├── uv.lock                                  # Python dependency lock
-├── pnpm-lock.yaml                           # JS dependency lock
-├── pyproject.toml                           # Root config for python tooling
-├── .prettierrc.json                         # Prettier config
-├── mise.toml                                # Development tasks (install, lint, test)
-├── mise.ci.toml                             # CI-specific tasks
-├── ...                                      # Various other configs...
-├── version-manifests/                       # Version manifests dictate what versions get deployed
-│   ├── latest.json                          # Latest deployed versions
-│   └── version-manifest.schema.json         # Latest deployed versions
-├── .github/workflows/
-│   ├── test.yml                             # PR testing workflow
-│   └── deploy.yml                           # Production deployment workflow
-├── cdk/                                     # CDK infrastructure
-│   ├── package.json                         # CDK specific dependencies
-│   ├── cdk.json                             # CDK app config
-│   ├── tsconfig.json                        # TypeScript config
-│   ├── jest.config.js                       # Jest test config
-│   ├── eslint.config.mjs                    # ESLint config
-│   ├── bin/                                 # CDK app entry point
-│   ├── lib/                                 # Stack definitions
-│   └── test/                                # Infrastructure tests
-└── packages/
-    └── <package_name>/
-        ├── pyproject.toml                   # Runtime dependencies + deployment config
-        ├── Dockerfile                       # Container definition (for Docker deployments)
-        ├── README.md                        # Package documentation
-        └── src/                             # Source code
+├── package.json              # Dependencies and scripts
+├── tsconfig.json             # TypeScript config
+├── cdk.json                  # CDK app config
+├── jest.config.js            # Jest test config
+├── eslint.config.mjs         # ESLint config
+├── mise.toml                 # Development tasks
+├── mise.ci.toml              # CI-specific tasks
+├── bin/                      # CDK app entry point
+├── lib/                      # Stack definitions
+├── test/                     # Infrastructure tests
+├── version-manifests/        # Version manifests
+│   ├── latest.json           # Current deployed versions
+│   └── version-manifest.schema.json
+└── .github/
+    ├── scripts/
+    │   └── update_version_manifest.py  # Updates manifest with version check
+    └── workflows/
+        ├── test.yml              # PR testing workflow
+        ├── deploy.yml            # Triggers CDK pipeline on push to master
+        └── update-manifest.yml   # Receives dispatch events from app repos
 ```
 
 ## Getting started
@@ -59,17 +79,16 @@ To do that create a local `mise.local.toml` file. Mise will handle the environme
 You can use `pnpm` to format, lint, build and test. Alternatively you can also use `mise` tasks which under will use `pnpm` under the hood.
 
 ```bash
-mise run pre-commit # Will execute pre-commit (formatting/linting)
-mise run cdk-build # Will build the CDK
-mise run cdk-test # Will run pnpm run build & pnpm run test
-mise run cdk-synth <stack> # Build & Synth, optionally supply Stack name
-mise run cdk-test-full <stack> # Build, Test & Synth, optionally supply Stack name
-mise run cdk-deploy <stack> # Deploy to AWS, optionally supply Stack name
+mise run pre-commit    # Run pre-commit (formatting/linting)
+mise run build         # Build CDK
+mise run test          # Build & run tests
+mise run test-full     # Build, test, pre-commit & synth
+mise run synth         # Build & synthesize stacks
+mise run diff          # Show diff for stacks
+mise run deploy        # Deploy to AWS
 
-# Or use pnpm commands directly
-cd cdk # Otherwise commands will run on all packages not just CDK
+# Or use pnpm directly
 pnpm run build
-pnpm run watch # watch for changes and compile
 pnpm run test
 pnpm run cdk synth
 pnpm run cdk diff
@@ -81,122 +100,162 @@ To see all available `mise` tasks run `mise run`.
 > Note:
 > `cdk diff` and `cdk deploy` require permissions to the account. You need at least ReadOnly permissions for `diff` and deployment permissions for `deploy`.
 
-### Development with Python Packages
+### Adding a New Application Repository
 
-Python packages live in the `packages/` directory. Each package uses [uv workspaces](https://docs.astral.sh/uv/concepts/workspaces/):
+1. Create a Personal Access Token (PAT) that can trigger workflows on this repo
+2. Create a new `prod` environment in the repository.
+3. Add the PAT as secret `CDK_REPO_PAT` in the new repo
+4. Configure remaining GitHub environment variables in the environment:
 
-- **Root `pyproject.toml`**: Contains **dev dependencies only** (pytest, ruff, pyright, etc.)
-- **Package `pyproject.toml`**: Contains **runtime dependencies** for that specific package
+| Variable                | Description                        |
+| ----------------------- | ---------------------------------- |
+| `CICD_ACCOUNT_ID`       | AWS account ID for CI/CD resources |
+| `AWS_REGION`            | AWS region (e.g., `us-east-1`)     |
+| `ECR_REPOSITORY_NAME`   | ECR repository name                |
+| `LAMBDA_S3_BUCKET_NAME` | S3 bucket for Lambda artifacts     |
+| `CDK_REPO_OWNER`        | GitHub owner of the CDK repo       |
+| `CDK_REPO_NAME`         | Name of the CDK repo               |
 
-This separation is required for Docker builds to include only required dependencies for each package. Instead of all dependencies from all packages.
+4. Build the application, use the `sample-python-repo` repo as the template.
+5. Give your new repository permissions to push to S3/ECR by updating the IAM permissions in this repo. This is done by updating the `constants.ts` file.
+6. Deploy your application using CDK. See below for usage in CDK stacks.
 
-```bash
-mise run pre-commit       # Run Pre-commit
-mise run py-lint          # Show linting issues
-mise run py-lint-fix      # Auto-fix linting issues
-mise run py-test sample_etl   # Run tests for specific package
-```
+#### Artifact Configuration
 
-There is a `sample_etl` package that showcases a sample package.
+Each workspace member package can produce **multiple named artifacts** - Docker images, Lambda packages, or a mix. Configure them in each package's `pyproject.toml` under `[tool.bergschacht.artifacts.<name>]`:
 
-#### Deployment Types
-
-Each package can be deployed as a **Docker container**, a **Lambda function**, or **both**. Configure this in the package's `pyproject.toml`:
-
-**Docker Only (default)**
-
-```toml
-[tool.bergschacht]
-deploy_types = ["docker"]
-```
-
-**Lambda Only**
+**Single Docker image (simplest case)**
 
 ```toml
-[tool.bergschacht]
-deploy_types = ["lambda"]
-lambda_function_name = "my-lambda-function"
+[tool.bergschacht.artifacts.my-app]
+type = "docker"
 ```
 
-**Both Docker and Lambda**
+**Single Lambda**
 
 ```toml
-[tool.bergschacht]
-deploy_types = ["docker", "lambda"]
-lambda_function_name = "my-lambda-function"
+[tool.bergschacht.artifacts.my-app]
+type = "lambda"
 ```
 
-#### Adding a New Python Package
+**Multiple artifacts from one package**
 
-1. Create a new directory under `packages/`
-2. Add a `pyproject.toml` with runtime dependencies
-3. Add deployment configuration in `[tool.bergschacht]`:
-   - For Docker: Add a `Dockerfile` for containerization (see note below)
-   - For Lambda: Specify `lambda_function_name` (the Lambda function must be created and configured via CDK in `cdk/lib/`)
-4. Update the main `pyproject.toml` to have your package listed in the `executionEnvironments` to avoid Pyright issues.
+```toml
+[tool.bergschacht.artifacts.worker]
+type = "docker"
+dockerfile = "Dockerfile.worker"   # optional, defaults to Dockerfile
 
-The deployment workflow will automatically detect the deployment type and handle the build/deploy accordingly.
+[tool.bergschacht.artifacts.api]
+type = "docker"
+dockerfile = "Dockerfile.api"
 
-**Important for Docker deployments**: Since this is a uv workspace, Dockerfiles must be written to build from the **workspace root** context. Your Dockerfile should:
-
-```dockerfile
-# Copy workspace root files (pyproject.toml defines workspace, uv.lock has all dependencies)
-COPY pyproject.toml uv.lock ./
-
-# Copy your specific package
-COPY packages/your-package/ ./packages/your-package/
-
-# Build with --package flag
-RUN uv build --package your-package --wheel --out-dir /wheels
+[tool.bergschacht.artifacts.webhook]
+type = "lambda"
 ```
 
-When building locally, run from the workspace root:
+Each artifact name becomes a key in the version manifest and is used for the image tag / S3 key.
 
-```bash
-docker build -f packages/your-package/Dockerfile -t your-package .
+#### uv Workspace Support
+
+Application repos support [uv workspaces](https://docs.astral.sh/uv/concepts/workspaces/) for monorepos with multiple independently versioned packages.
+
+**Workspace layout:**
+
+```
+my-etl-monorepo/
+├── pyproject.toml              # workspace root
+├── packages/
+│   ├── etl-users/
+│   │   ├── pyproject.toml      # version = "1.2.0"
+│   │   ├── Dockerfile
+│   │   └── src/etl_users/
+│   ├── etl-orders/
+│   │   ├── pyproject.toml      # version = "0.5.0"
+│   │   ├── Dockerfile
+│   │   └── src/etl_orders/
+│   └── etl-payments/
+│       ├── pyproject.toml      # version = "3.1.0"
+│       └── src/etl_payments/
+└── .github/
+    ├── scripts/extract_config.py
+    └── workflows/deploy.yml
 ```
 
-## Version Management
+**Root `pyproject.toml`:**
 
-Application versions (Lambda & Docker images) are managed through the version manifest which is stored in the `version-manifest/` directory. To rollback you can simply revert back to a good commit. To revert a specific stage in the CDK pipeline you can revert to a specific execution Id in the pipeline itself.
+```toml
+[project]
+name = "my-etl-monorepo"
+version = "0.0.0"  # workspace root version is unused
+
+[tool.uv.workspace]
+members = ["packages/*"]
+```
+
+**Member `packages/etl-users/pyproject.toml`:**
+
+```toml
+[project]
+name = "etl-users"
+version = "1.2.0"
+dependencies = ["pandas>=2.0.0"]
+
+[tool.bergschacht.artifacts.etl-users]
+type = "docker"
+```
+
+The deploy workflow automatically:
+
+1. Discovers all workspace members via `[tool.uv.workspace.members]` globs
+2. Compares each member's version against the previous commit
+3. Deploys only packages whose version was bumped
+4. Creates per-package tags (e.g., `etl-users/v1.2.0`)
+5. Each artifact carries its own version in the manifest payload
+
+For non-workspace repos (single `pyproject.toml` at root), everything works the same - the script treats the root as the only package.
+
+### Version Management
+
+Application versions are tracked in `version-manifests/latest.json`.
+
+### How it works
+
+1. **Application repos** build and push Docker images / Lambda packages to AWS
+2. They send a `repository_dispatch` event to this repo with deployment metadata (each artifact includes its own version)
+3. The `update-manifest.yml` workflow runs `update_version_manifest.py`, which only updates the manifest if the version is newer than the existing one
+4. The manifest commit triggers `deploy.yml`, which starts the **CDK pipeline**
+
+> If an artifact was deleted from AWS you can redeploy it simply by rerunning an old workflow inside the application repo to redeploy the artifact for said version.
+
+### Rollback
+
+- **Specific artifact**: Revert the version manifest commit or make a new commit to the version manifest.
+- **CDK stage**: Revert to a specific execution ID in CodePipeline or revert to a previous commit in this repo.
 
 ### Version Manifest Structure
-
-Each package can have one or more deployment types (lambda, image, or both):
 
 ```json
 {
   "$schema": "./version-manifest.schema.json",
   "schemaVersion": "1.0.0",
-  "packages": {
-    "my-lambda": {
-      "lambda": {
-        "bucket": "my-artifacts-bucket",
-        "key": "lambdas/my-lambda/v1.0.0.zip",
-        "version": "1.0.0",
-        "commitSha": "abc1234"
-      }
-    },
-    "my-service": {
-      "image": {
-        "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/my-service",
-        "imageTag": "v2.0.0",
-        "version": "2.0.0",
-        "commitSha": "def5678"
-      }
-    },
-    "dual-deploy-service": {
-      "lambda": {
-        "bucket": "my-artifacts-bucket",
-        "key": "lambdas/dual-deploy-service/v1.0.0.zip",
-        "version": "1.0.0",
-        "commitSha": "abc1234"
+  "repositories": {
+    "sample-python-repo": {
+      "source": "feuerstein/sample-python-repo",
+      "images": {
+        "sample-python-repo": {
+          "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+          "imageTag": "sample-python-repo-0.1.0",
+          "version": "0.1.0",
+          "commitSha": "abc123..."
+        }
       },
-      "image": {
-        "repository": "123456789012.dkr.ecr.us-east-1.amazonaws.com/dual-deploy-service",
-        "imageTag": "v1.0.0",
-        "version": "1.0.0",
-        "commitSha": "abc1234"
+      "lambdas": {
+        "sample-python-repo": {
+          "bucket": "example-lambda-artifacts",
+          "key": "sample-python-repo/sample-python-repo-0.1.0.zip",
+          "version": "0.1.0",
+          "commitSha": "abc123..."
+        }
       }
     }
   }
@@ -225,15 +284,15 @@ Each package can have one or more deployment types (lambda, image, or both):
 
 ```typescript
 import {
-  getLambdaPackage,
-  getImagePackage,
-  getPackageDeploymentTypes,
+  getLambdaArtifact,
+  getImageArtifact,
+  getRepositoryDeploymentTypes,
 } from '../lib/version-manifest';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 
-// Get Lambda package configuration
-const lambdaConfig = getLambdaPackage('order-processor');
+// Get Lambda package configuration. Pass repo and artifact name.
+const lambdaConfig = getLambdaArtifact('order-processor', 'order-processor');
 
 new lambda.Function(this, 'OrderProcessor', {
   code: lambda.Code.fromBucket(
@@ -243,163 +302,34 @@ new lambda.Function(this, 'OrderProcessor', {
   // ... other configuration
 });
 
-// Get container image configuration
-const imageConfig = getImagePackage('payment-service');
+const lambdaConfig = getImageArtifact('order-processor', 'order-processor');
 // Use imageConfig.repository and imageConfig.imageTag
 
-// For packages with both deployment types
-const dualDeployTypes = getPackageDeploymentTypes('dual-deploy-service');
+// Multi-artifact repo: get specific named artifacts
+const workerImage = getImageArtifact('order-service', 'worker');
+const apiImage = getImageArtifact('order-service', 'api');
+const webhookLambda = getLambdaArtifact('order-service', 'webhook');
+
+// Check deployment types for a repository
+const types = getRepositoryDeploymentTypes('dual-deploy-service');
 // Returns: ['lambda', 'image']
-const dualLambdaConfig = getLambdaPackage('dual-deploy-service');
-const dualImageConfig = getImagePackage('dual-deploy-service');
 ```
 
-### Updating Versions
+## Deployment Model
 
-A workflow will automatically publish a new version after a package is updated and the new commit is merged to master but you can do it manually as well if something specific needs to be overridden.
-
-```bash
-# Update latest.json with new Lambda version (use jq or edit manually)
-jq '.packages["my-lambda"].lambda = {
-  "bucket": "my-artifacts-bucket",
-  "key": "lambdas/my-lambda/v1.1.0.zip",
-  "version": "1.1.0",
-  "commitSha": "newsha123"
-}' version-manifests/latest.json > tmp.json && mv tmp.json version-manifests/latest.json
-
-# Commit and push
-git add version-manifests/latest.json
-git commit -m "chore: bump my-lambda to v1.1.0"
-git push
-```
-
-Schema validation is done as part of pre-commit. Simply run `mise run pre-commit`.
-
-**Note**:
-
-- In the future we should have specific overrides per region/stage/account etc. This might be done via a separate `version-manifest` service or maybe a separate repo.
-
-## GitHub Actions CI/CD
-
-GitHub Actions handles the continuous integration and artifact deployment pipeline. The workflows live in `.github/workflows/` and are supported by Python scripts in `.github/scripts/`.
-
-### Workflows
-
-#### Test Workflow (`test.yml`)
-
-Runs on every pull request and push to `master`:
-
-1. **Pre-commit** - Runs formatting and linting checks
-2. **Test** - Runs Python tests, builds CDK, runs CDK tests, and performs `cdk diff`
-
-#### Deploy Workflow (`deploy.yml`)
-
-Runs only on push to `master` and handles the full deployment pipeline:
-
-```
-┌─────────────────┐     ┌─────────────┐     ┌───────────────┐     ┌─────────────────┐     ┌────────────┐
-│ detect-changes  │---->│ create-tags │---->│ deploy-docker │---->│ commit-manifest │---->│ deploy-cdk │
-│                 │     │             │     │ deploy-lambda │     │                 │     │            │
-└─────────────────┘     └─────────────┘     └───────────────┘     └─────────────────┘     └────────────┘
-```
-
-### Change Detection
-
-The workflow automatically detects which packages and CDK code have changed using [dorny/paths-filter](https://github.com/dorny/paths-filter):
-
-- **Package changes**: Detects changes in `packages/*/` directories
-- **CDK changes**: Detects changes in `cdk/` directory or `version-manifests/latest.json`
-
-Only packages with actual file changes are built and deployed. The CDK pipeline only triggers if CDK code changed or packages were deployed.
-
-### Helper Scripts
-
-Located in `.github/scripts/`:
-
-| Script                       | Purpose                                                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `categorize_packages.py`     | Reads `pyproject.toml` for each changed package and categorizes them by deployment type (docker/lambda) |
-| `extract_config.py`          | Extracts version and deployment config from a single package's `pyproject.toml`                         |
-| `update_version_manifest.py` | Updates `version-manifests/latest.json` with newly deployed package versions                            |
-
-### Deployment Flow
-
-#### 1. Create Tags (`create-tags` job)
-
-For each changed package, creates a git tag in the format `{package}-v{version}`:
-
-- If the tag already exists on the current commit -> proceeds (allows re-deployment, this is needed if this version was deleted from AWS)
-- If the tag exists on a different commit -> fails (version must be bumped)
-- If the tag doesn't exist → creates and pushes the new tag
-
-#### 2. Build & Push Artifacts
-
-**Docker Packages (`deploy-docker` job)**:
-
-- Checks if image already exists in ECR (skips build if so)
-- Builds Docker image from `packages/{package}/Dockerfile`
-- Pushes to ECR with tag: `{repo}-{package}-{version}`
-- Creates deployment metadata artifact
-
-**Lambda Packages (`deploy-lambda` job)**:
-
-- Checks if zip already exists in S3 (skips build if so)
-- Uses `uv pip install --target` to create a deployment package
-- Uploads zip to S3: `s3://{bucket}/{repo}/{package}/{package}.zip`
-- Creates deployment metadata artifact
-
-Jobs run in parallel via matrix
-
-#### 3. Update Version Manifest (`commit-manifest` job)
-
-After successful deployments:
-
-1. Downloads all deployment metadata artifacts
-2. Runs `update_version_manifest.py` for each artifact
-3. The script performs version comparison - only updates if the new version is higher
-4. Commits changes to `version-manifests/latest.json` with `[skip ci]` to prevent infinite loops
-5. Uses retry logic with rebase for concurrent updates
-
-The commit is made by `github-actions[bot]`:
-
-```
-chore: update package versions [skip ci]
-```
-
-#### 4. Trigger CDK Pipeline (`deploy-cdk` job)
-
-Conditionally triggers the AWS CodePipeline to deploy infrastructure:
-
-```bash
-aws codepipeline start-pipeline-execution --name BergschachtProductionPipeline
-```
-
-The CDK pipeline only runs when:
-
-- CDK code changes are detected (files in `cdk/` or `version-manifests/latest.json`), OR
-- Packages were successfully deployed (indicated by `commit-manifest` job success)
-
-This optimization prevents unnecessary pipeline executions when only documentation or workflow files change.
-
-The CDK pipeline reads `version-manifests/latest.json` to determine which artifact versions to deploy.
+Deployments are handled by two CDK Pipelines which both live in the CI/CD account. At the same time GitHub actions run CI tasks like testing, linting etc.
 
 ### Environment Variables & Secrets
 
-The workflow uses GitHub environment variables:
+These are the required environment variables that GitHub Actions require to trigger the Production CDK pipeline:
 
 | Variable                 | Description                        |
 | ------------------------ | ---------------------------------- |
 | `CICD_ACCOUNT_ID`        | AWS account ID for CI/CD resources |
 | `AWS_REGION`             | AWS region for deployments         |
-| `LAMBDA_S3_BUCKET_NAME`  | S3 bucket for Lambda artifacts     |
-| `ECR_REPOSITORY_NAME`    | ECR Repository name for images     |
 | `PROD_CDK_PIPELINE_NAME` | Production CDK Pipeline name       |
 
 AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` action, assuming a role: `{repo}-prod-github-actions-role`.
-
-## Deployment Model
-
-Deployments are handled by two CDK Pipelines which both live in the CI/CD account. At the same time GitHub actions run CI tasks like testing, linting etc.
 
 ### Production Pipeline (`ProductionPipelineStack`)
 
@@ -538,9 +468,3 @@ This stack creates an ECR repository for storing container images:
 - Sets up lifecycle rules to keep only the last 10 images
 - Optionally grants cross-account pull permissions to specified AWS accounts
 - Optionally sends SNS notifications when image scans detect CRITICAL or HIGH severity vulnerabilities via EventBridge rules
-
-## Packages
-
-| Package      | Description                           | Deploy Type     |
-| ------------ | ------------------------------------- | --------------- |
-| `sample_etl` | Sample ETL pipeline for demonstration | Docker & Lambda |

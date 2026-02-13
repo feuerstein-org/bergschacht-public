@@ -6,6 +6,7 @@ import { Construct } from 'constructs';
 import { CicdStage } from './stages/cicd-stage';
 import { DevStage } from './stages/dev-stage';
 import { ProdStage } from './stages/prod-stage';
+import { ApplicationRepo } from './constants';
 
 export interface ProductionPipelineStackProps extends cdk.StackProps {
   /**
@@ -45,6 +46,11 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
    * Email address for PagerDuty alerts
    */
   readonly pagerDutyEmail: string;
+  /**
+   * Application repositories that get scoped artifact-push permissions.
+   * @default []
+   */
+  readonly applicationRepos?: ApplicationRepo[];
 }
 
 /**
@@ -101,6 +107,7 @@ export class ProductionPipelineStack extends cdk.Stack {
       prodAccountId: props.prodAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
+      applicationRepos: props.applicationRepos,
       env: { account: props.cicdAccountId, region: props.awsRegion },
     });
     this.pipeline.addStage(cicdStage);

@@ -32,31 +32,3 @@ repos:
         entry: bash -c 'find version-manifests/ -name "*.json" ! -name "*.schema.json" -exec pnpm exec ajv validate -s version-manifests/version-manifest.schema.json -d {} --spec=draft2020 \;'
         language: system
         pass_filenames: false
-
-      - id: pyright
-        name: pyright
-        entry: uv run pyright
-        language: system
-        types: [python]
-
-      - id: ruff-check
-        name: ruff-check
-        entry: uv run ruff check
-        language: system
-        types: [python]
-        args: [--fix]
-
-      - id: ruff-format
-        name: ruff-format
-        entry: uv run ruff format
-        language: system
-        types: [python]
-
-      - id: pyupgrade
-        name: pyupgrade
-        entry: uv run pyupgrade
-        language: system
-        types: [python]
-        args: ['--py314-plus']
-
-  # Check Dockerfile exists for each Python package -- add this if package uses Docker
