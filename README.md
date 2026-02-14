@@ -138,6 +138,20 @@ type = "docker"
 type = "lambda"
 ```
 
+**Docker Image and Lambda using the same artifact name**
+
+```toml
+[tool.bergschacht.artifacts.sample-python-repo]
+type = ["docker", "lambda"]
+```
+
+The `type` field can be:
+
+- A single string: `type = "docker"`
+- A list of types: `type = ["docker", "lambda"]`
+
+When multiple types are specified, separate artifacts are created for each type, all using the same artifact name.
+
 **Multiple artifacts from one package**
 
 ```toml

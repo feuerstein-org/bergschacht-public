@@ -1,8 +1,24 @@
 name: Update Version Manifest
 
 on:
-  repository_dispatch:
-    types: [update-manifest]
+  workflow_dispatch:
+    inputs:
+      repoName:
+        description: 'Repository name'
+        required: true
+        type: string
+      commitSha:
+        description: 'Commit SHA'
+        required: true
+        type: string
+      sourceRepo:
+        description: 'Source repository (org/repo format)'
+        required: true
+        type: string
+      artifacts:
+        description: 'JSON string containing artifacts array'
+        required: true
+        type: string
 
 # Concurrency: serialize manifest updates to avoid conflicts
 concurrency:
@@ -22,7 +38,15 @@ jobs:
 
       - name: Write deployment metadata
         run: |
-          echo '${{ toJson(github.event.client_payload) }}' > /tmp/metadata.json
+          # Reconstruct metadata from workflow inputs for validation
+          cat > /tmp/metadata.json <<EOF
+          {
+            "repoName": "${{ inputs.repoName }}",
+            "commitSha": "${{ inputs.commitSha }}",
+            "sourceRepo": "${{ inputs.sourceRepo }}",
+            "artifacts": ${{ inputs.artifacts }}
+          }
+          EOF
           echo "Received metadata:"
           cat /tmp/metadata.json
 
@@ -35,9 +59,9 @@ jobs:
       - name: Commit and push manifest update
         if: steps.update.outputs.updated == 'true'
         env:
-          REPO_NAME: ${{ github.event.client_payload.repoName }}
-          COMMIT_SHA: ${{ github.event.client_payload.commitSha }}
-          SOURCE_REPO: ${{ github.event.client_payload.sourceRepo }}
+          REPO_NAME: ${{ inputs.repoName }}
+          COMMIT_SHA: ${{ inputs.commitSha }}
+          SOURCE_REPO: ${{ inputs.sourceRepo }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -50,7 +74,7 @@ jobs:
           fi
 
           # Build a summary of deployed artifact versions
-          VERSIONS=$(echo '${{ toJson(github.event.client_payload.artifacts) }}' \
+          VERSIONS=$(echo '${{ inputs.artifacts }}' \
             | jq -r '.[] | "\(.name)@\(.version)"' | paste -sd ', ')
 
           git commit -m "chore: update ${REPO_NAME} artifacts (${VERSIONS})
