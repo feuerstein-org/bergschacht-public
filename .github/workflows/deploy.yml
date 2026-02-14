@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - master
+    paths:
+      - 'lib/**'
+      - 'bin/**'
+      - 'version-manifests/**'
+  workflow_dispatch:
 
 # Required for OIDC authentication with AWS
 permissions:

@@ -102,10 +102,15 @@ To see all available `mise` tasks run `mise run`.
 
 ### Adding a New Application Repository
 
-1. Create a Personal Access Token (PAT) that can trigger workflows on this repo
+1. Create your new repository, use the `sample-python-repo` repo as the template.
 2. Create a new `prod` environment in the repository.
-3. Add the PAT as secret `CDK_REPO_PAT` in the new repo
-4. Configure remaining GitHub environment variables in the environment:
+3. Get the App ID and generate the private key for your repo [here](https://github.com/organizations/feuerstein-org/settings/apps/version-manifest)
+4. Configure remaining GitHub environment variables/secrets in the `prod` environment:
+
+| Secret                     | Description                                        |
+| -------------------------- | -------------------------------------------------- |
+| `CDK_REPO_APP_ID`          | GitHub App ID for triggering workflows in CDK repo |
+| `CDK_REPO_APP_PRIVATE_KEY` | GitHub App private key for authentication          |
 
 | Variable                | Description                        |
 | ----------------------- | ---------------------------------- |
@@ -116,9 +121,8 @@ To see all available `mise` tasks run `mise run`.
 | `CDK_REPO_OWNER`        | GitHub owner of the CDK repo       |
 | `CDK_REPO_NAME`         | Name of the CDK repo               |
 
-4. Build the application, use the `sample-python-repo` repo as the template.
-5. Give your new repository permissions to push to S3/ECR by updating the IAM permissions in this repo. This is done by updating the `constants.ts` file.
-6. Deploy your application using CDK. See below for usage in CDK stacks.
+4. Give your new repository permissions to push to S3/ECR by updating the IAM permissions in this repo. This is done by updating the `constants.ts` file.
+5. Deploy your application using CDK. See below for usage in CDK stacks.
 
 #### Artifact Configuration
 
@@ -347,7 +351,7 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 
 ### Production Pipeline (`ProductionPipelineStack`)
 
-- **Triggered by**: GithubAction triggered on push to `master` branch.
+- **Triggered by**: GithubAction triggered on push to `master` branch (`bin`, `lib` and `version-manifests` directories)
 - **Deployment stages**:
   1. **CICD Account** - Shared resources (KMS keys, ECR repository, Lambda artifacts bucket, central logging...)
   2. **Dev Account** - Development environment infrastructure
