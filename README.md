@@ -128,6 +128,14 @@ To see all available `mise` tasks run `mise run`.
 
 Each workspace member package can produce **multiple named artifacts** - Docker images, Lambda packages, or a mix. Configure them in each package's `pyproject.toml` under `[tool.bergschacht.artifacts.<name>]`:
 
+The hiararchy is as follows:
+
+- Repository
+- Package
+- Artifact
+
+Packages are versioned, artifacts are not. This means each package version can have different artifacts. Workspaces allow you to have multiple packages in one repository, if it's not a workspace then the repository will have only one package.
+
 **Single Docker image (simplest case)**
 
 ```toml
@@ -145,7 +153,7 @@ type = "lambda"
 **Docker Image and Lambda using the same artifact name**
 
 ```toml
-[tool.bergschacht.artifacts.sample-python-repo]
+[tool.bergschacht.artifacts.sample-python-app]
 type = ["docker", "lambda"]
 ```
 
