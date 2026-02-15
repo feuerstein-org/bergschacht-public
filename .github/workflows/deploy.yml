@@ -9,10 +9,7 @@ on:
       - 'bin/**'
       - 'version-manifests/**'
   workflow_dispatch:
-  workflow_run:
-    workflows: ['Update Version Manifest'] # Trigger deployment after manifest update
-    types:
-      - completed
+  workflow_call:
 
 # Required for OIDC authentication with AWS
 permissions:

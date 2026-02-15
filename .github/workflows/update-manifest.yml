@@ -27,10 +27,13 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   update-manifest:
     runs-on: ubuntu-latest
+    outputs:
+      committed: ${{ steps.commit.outputs.committed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +60,7 @@ jobs:
             --from-metadata /tmp/metadata.json
 
       - name: Commit and push manifest update
+        id: commit
         if: steps.update.outputs.updated == 'true'
         env:
           REPO_NAME: ${{ inputs.repoName }}
@@ -73,22 +77,64 @@ jobs:
             exit 0
           fi
 
-          # Build a summary of deployed artifact versions
-          VERSIONS=$(echo '${{ inputs.artifacts }}' \
-            | jq -r '.[] | "\(.name)@\(.version)"' | paste -sd ', ')
+          # Build detailed artifact list with versions and types
+          ARTIFACT_LIST=$(echo '${{ inputs.artifacts }}' \
+            | jq -r '.[] | "- \(.name)@\(.version) (\(.type))"' \
+            | paste -sd '\n')
 
-          git commit -m "chore: update ${REPO_NAME} artifacts (${VERSIONS})
+          git commit -m "chore: update from ${SOURCE_REPO}
 
-          Triggered by: https://github.com/${SOURCE_REPO}/commit/${COMMIT_SHA}"
+          ${ARTIFACT_LIST}
 
-          # Retry push with rebase in case of concurrent updates
+          Commit: ${COMMIT_SHA}"
+
+          # Retry push with conflict resolution in case of concurrent updates
           for i in {1..5}; do
             if git push; then
               echo "Successfully pushed manifest update"
+              echo "committed=true" >> $GITHUB_OUTPUT
               break
             else
-              echo "Push failed, retrying in $((i * 2)) seconds..."
+              echo "Push failed (attempt $i/5), retrying in $((i * 2)) seconds..."
               sleep $((i * 2))
-              git pull --rebase origin master
+
+              # Abort any failed rebase and reset to clean state
+              git rebase --abort 2>/dev/null || true
+              git reset --hard HEAD
+
+              # Fetch latest changes
+              git fetch origin master
+              git reset --hard origin/master
+
+              # Re-run the update script to merge changes properly
+              python3 .github/scripts/update_version_manifest.py \
+                --from-metadata /tmp/metadata.json
+
+              # Stage and commit again
+              git add version-manifests/latest.json
+
+              if git diff --staged --quiet; then
+                echo "No changes after re-update, manifest may already be current"
+                echo "committed=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+
+              git commit -m "chore: update from ${SOURCE_REPO}
+
+          ${ARTIFACT_LIST}
+
+          Commit: ${COMMIT_SHA}"
             fi
           done
+
+          # Check if we exhausted retries
+          if ! git diff --quiet HEAD origin/master 2>/dev/null; then
+            echo "Failed to push after 5 attempts"
+            exit 1
+          fi
+
+  deploy:
+    needs: update-manifest
+    if: needs.update-manifest.outputs.committed == 'true'
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
