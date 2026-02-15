@@ -26,9 +26,9 @@
       "images": {
         "etl-orders": {
           "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-          "imageTag": "sample-python-monorepo-etl-orders-0.1.0",
-          "version": "0.1.0",
-          "commitSha": "af3cb58f4ca448ff67535d1d63c7fdb6e48107a8"
+          "imageTag": "sample-python-monorepo-etl-orders-0.2.0",
+          "version": "0.2.0",
+          "commitSha": "a0fe0cbb7f0b8bf52fddfdcb27c37bdc782bfe14"
         },
         "etl-users": {
           "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
@@ -40,9 +40,9 @@
       "lambdas": {
         "etl-orders": {
           "bucket": "example-lambda-artifacts",
-          "key": "sample-python-monorepo/etl-orders-0.1.0.zip",
-          "version": "0.1.0",
-          "commitSha": "af3cb58f4ca448ff67535d1d63c7fdb6e48107a8"
+          "key": "sample-python-monorepo/etl-orders-0.2.0.zip",
+          "version": "0.2.0",
+          "commitSha": "a0fe0cbb7f0b8bf52fddfdcb27c37bdc782bfe14"
         }
       }
     }
