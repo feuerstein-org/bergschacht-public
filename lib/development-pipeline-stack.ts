@@ -3,7 +3,7 @@ import * as pipelines from 'aws-cdk-lib/pipelines';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
 import { Construct } from 'constructs';
 import { NagSuppressions } from 'cdk-nag';
-import { DevStage } from './stages/dev-stage';
+import { EnvironmentStage } from './stages/environment-stage';
 
 export interface DevelopmentPipelineStackProps extends cdk.StackProps {
   /**
@@ -18,10 +18,6 @@ export interface DevelopmentPipelineStackProps extends cdk.StackProps {
    * Arn of the GitHub connection in AWS CodeConnections
    */
   readonly connectionArn: string;
-  /**
-   * The CICD account ID
-   */
-  readonly cicdAccountId: string;
   /**
    * The Dev account ID
    */
@@ -86,9 +82,8 @@ export class DevelopmentPipelineStack extends cdk.Stack {
     });
 
     // Deploy to Dev account only
-    const devStage = new DevStage(this, 'Dev', {
-      cicdAccountId: props.cicdAccountId,
-      devAccountId: props.devAccountId,
+    const devStage = new EnvironmentStage(this, 'Dev', {
+      accountId: props.devAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
       env: { account: props.devAccountId, region: props.awsRegion },

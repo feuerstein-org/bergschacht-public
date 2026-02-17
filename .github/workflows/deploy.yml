@@ -9,7 +9,23 @@ on:
       - 'bin/**'
       - 'version-manifests/**'
   workflow_dispatch:
+    inputs:
+      pipeline:
+        description: 'Which pipeline(s) to trigger'
+        required: true
+        type: choice
+        options:
+          - auto
+          - infra
+          - prod
+          - all
+        default: auto
   workflow_call:
+    inputs:
+      pipeline:
+        description: 'Which pipeline(s) to trigger (infra, prod, all)'
+        required: true
+        type: string
 
 # Required for OIDC authentication with AWS
 permissions:
@@ -20,7 +36,148 @@ env:
   ROLE_NAME: ${{ github.event.repository.name }}-prod-github-actions-role
 
 jobs:
-  deploy-cdk:
+  # Synth CDK templates and compare checksums to detect real changes.
+  # Only runs in auto mode (push to master). Skipped for explicit pipeline selection.
+  synth-detect:
+    if: inputs.pipeline == '' || inputs.pipeline == 'auto'
+    runs-on: ubuntu-latest
+    outputs:
+      infra_changed: ${{ steps.diff.outputs.infra_changed }}
+      prod_changed: ${{ steps.diff.outputs.prod_changed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: mise run install-ci
+
+      - name: Build & Synth
+        run: |
+          mise run build-ci
+          pnpm run cdk synth --quiet 2>/dev/null || true
+
+      - name: Compute template checksums
+        id: checksums
+        run: |
+          # Hash all CloudFormation templates grouped by pipeline prefix
+          # Template files follow the pattern: <PipelineId>-<Stage>-<Stack><hash>.template.json
+          cd cdk.out
+
+          INFRA_HASH=""
+          PROD_HASH=""
+
+          for f in *.template.json; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              InfraPipeline*)
+                INFRA_HASH="${INFRA_HASH}$(sha256sum "$f")"
+                ;;
+              ProductionPipeline*)
+                PROD_HASH="${PROD_HASH}$(sha256sum "$f")"
+                ;;
+            esac
+          done
+
+          # Produce a single hash per pipeline (hash of hashes)
+          echo "infra=$(echo "$INFRA_HASH" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "prod=$(echo "$PROD_HASH" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore previous checksums
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .template-checksums
+          key: template-checksums-${{ github.sha }}
+          restore-keys: |
+            template-checksums-
+
+      - name: Compare against previous checksums
+        id: diff
+        run: |
+          INFRA_CHANGED=true
+          PROD_CHANGED=true
+
+          if [ -f .template-checksums ]; then
+            PREV_INFRA=$(grep '^infra=' .template-checksums | cut -d= -f2)
+            PREV_PROD=$(grep '^prod=' .template-checksums | cut -d= -f2)
+
+            if [ "$PREV_INFRA" = "${{ steps.checksums.outputs.infra }}" ]; then
+              INFRA_CHANGED=false
+              echo "Infrastructure templates unchanged"
+            else
+              echo "Infrastructure templates changed"
+            fi
+
+            if [ "$PREV_PROD" = "${{ steps.checksums.outputs.prod }}" ]; then
+              PROD_CHANGED=false
+              echo "Production templates unchanged"
+            else
+              echo "Production templates changed"
+            fi
+          else
+            echo "No previous checksums found, treating all as changed"
+          fi
+
+          echo "infra_changed=$INFRA_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "prod_changed=$PROD_CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Save current checksums
+        run: |
+          echo "infra=${{ steps.checksums.outputs.infra }}" > .template-checksums
+          echo "prod=${{ steps.checksums.outputs.prod }}" >> .template-checksums
+
+      - name: Cache checksums
+        uses: actions/cache/save@v4
+        with:
+          path: .template-checksums
+          key: template-checksums-${{ github.sha }}
+
+  # Resolves which pipelines to trigger.
+  # For auto mode, reads synth-detect outputs. For explicit mode, uses the input directly.
+  resolve:
+    needs: synth-detect
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      trigger_infra: ${{ steps.resolve.outputs.trigger_infra }}
+      trigger_prod: ${{ steps.resolve.outputs.trigger_prod }}
+    steps:
+      - name: Resolve which pipelines to trigger
+        id: resolve
+        run: |
+          PIPELINE="${{ inputs.pipeline || 'auto' }}"
+
+          case "$PIPELINE" in
+            all)
+              TRIGGER_INFRA=true
+              TRIGGER_PROD=true
+              ;;
+            infra)
+              TRIGGER_INFRA=true
+              TRIGGER_PROD=false
+              ;;
+            prod)
+              TRIGGER_INFRA=false
+              TRIGGER_PROD=true
+              ;;
+            auto)
+              TRIGGER_INFRA=${{ needs.synth-detect.outputs.infra_changed }}
+              TRIGGER_PROD=${{ needs.synth-detect.outputs.prod_changed }}
+              ;;
+          esac
+
+          echo "trigger_infra=$TRIGGER_INFRA" >> "$GITHUB_OUTPUT"
+          echo "trigger_prod=$TRIGGER_PROD" >> "$GITHUB_OUTPUT"
+
+          echo "Pipeline selection: $PIPELINE"
+          echo "  Infra: $TRIGGER_INFRA"
+          echo "  Prod:  $TRIGGER_PROD"
+
+  deploy-infra:
+    needs: resolve
+    if: needs.resolve.outputs.trigger_infra == 'true'
     runs-on: ubuntu-latest
     environment:
       name: prod
@@ -30,10 +187,30 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: GitHubActions-CDK-${{ github.run_id }}
+          role-session-name: GitHubActions-InfraPipeline-${{ github.run_id }}
 
-      - name: Trigger CDK Pipeline
+      - name: Trigger Infrastructure Pipeline
         run: |
-          echo "Triggering CDK Pipeline deployment..."
+          echo "Triggering Infrastructure CDK Pipeline..."
+          aws codepipeline start-pipeline-execution --name ${{ vars.INFRA_CDK_PIPELINE_NAME }}
+          echo "Infrastructure CDK Pipeline triggered successfully"
+
+  deploy-prod:
+    needs: resolve
+    if: needs.resolve.outputs.trigger_prod == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-ProdPipeline-${{ github.run_id }}
+
+      - name: Trigger Production Pipeline
+        run: |
+          echo "Triggering Production CDK Pipeline..."
           aws codepipeline start-pipeline-execution --name ${{ vars.PROD_CDK_PIPELINE_NAME }}
-          echo "CDK Pipeline triggered successfully"
+          echo "Production CDK Pipeline triggered successfully"

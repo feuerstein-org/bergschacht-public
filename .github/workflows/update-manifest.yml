@@ -137,4 +137,6 @@ jobs:
     needs: update-manifest
     if: needs.update-manifest.outputs.committed == 'true'
     uses: ./.github/workflows/deploy.yml
+    with:
+      pipeline: prod
     secrets: inherit

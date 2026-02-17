@@ -3,10 +3,7 @@ import * as pipelines from 'aws-cdk-lib/pipelines';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { CicdStage } from './stages/cicd-stage';
-import { DevStage } from './stages/dev-stage';
-import { ProdStage } from './stages/prod-stage';
-import { ApplicationRepo } from './constants';
+import { EnvironmentStage } from './stages/environment-stage';
 
 export interface ProductionPipelineStackProps extends cdk.StackProps {
   /**
@@ -27,10 +24,6 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
    */
   readonly connectionArn: string;
   /**
-   * The CICD account ID
-   */
-  readonly cicdAccountId: string;
-  /**
    * The Dev account ID
    */
   readonly devAccountId: string;
@@ -46,17 +39,15 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
    * Email address for PagerDuty alerts
    */
   readonly pagerDutyEmail: string;
-  /**
-   * Application repositories that get scoped artifact-push permissions.
-   * @default []
-   */
-  readonly applicationRepos?: ApplicationRepo[];
 }
 
 /**
- * CDK Pipeline for production deployments.
- * This pipeline deploys to CICD -> Dev -> Prod.
- * It is triggered ONLY from the master branch.
+ * CDK Pipeline for production application deployments.
+ * This pipeline deploys application workloads (ECS services, Lambda functions, etc.)
+ * that consume the version manifest. It deploys to Dev -> Prod only (no CICD stage needed).
+ *
+ * Triggered by GitHub Actions when version-manifests/ or application stage code changes.
+ * Infrastructure changes (KMS, ECR, OIDC, etc.) are handled by InfraPipelineStack.
  */
 export class ProductionPipelineStack extends cdk.Stack {
   public readonly pipeline: pipelines.CodePipeline;
@@ -66,17 +57,13 @@ export class ProductionPipelineStack extends cdk.Stack {
 
     const branch = props.branch ?? 'master';
 
-    // Create the CodePipeline V2 pipeline
     const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineProduction', {
       pipelineName: 'BergschachtProductionPipeline',
       pipelineType: codepipeline.PipelineType.V2,
-      // Cross-account keys are required for cross-account deployments
-      // Potentially we want to reuse the same key we use for other CICD resources
       crossAccountKeys: true,
       restartExecutionOnUpdate: true,
     });
 
-    // Create the CDK Pipeline with CodeStar connection source
     this.pipeline = new pipelines.CodePipeline(this, 'ProductionPipeline', {
       codePipeline: underlyingPipeline,
       synth: new pipelines.ShellStep('Synth', {
@@ -89,7 +76,6 @@ export class ProductionPipelineStack extends cdk.Stack {
           }
         ),
         commands: [
-          // TODO: Use mise instead?
           'npm install -g pnpm',
           'pnpm install --frozen-lockfile',
           'pnpm run build',
@@ -101,29 +87,16 @@ export class ProductionPipelineStack extends cdk.Stack {
       selfMutation: true,
     });
 
-    const cicdStage = new CicdStage(this, 'Cicd', {
-      cicdAccountId: props.cicdAccountId,
-      devAccountId: props.devAccountId,
-      prodAccountId: props.prodAccountId,
-      awsRegion: props.awsRegion,
-      pagerDutyEmail: props.pagerDutyEmail,
-      applicationRepos: props.applicationRepos,
-      env: { account: props.cicdAccountId, region: props.awsRegion },
-    });
-    this.pipeline.addStage(cicdStage);
-
-    const devStage = new DevStage(this, 'Dev', {
-      cicdAccountId: props.cicdAccountId,
-      devAccountId: props.devAccountId,
+    const devStage = new EnvironmentStage(this, 'Dev', {
+      accountId: props.devAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
       env: { account: props.devAccountId, region: props.awsRegion },
     });
     this.pipeline.addStage(devStage);
 
-    const prodStage = new ProdStage(this, 'Prod', {
-      cicdAccountId: props.cicdAccountId,
-      prodAccountId: props.prodAccountId,
+    const prodStage = new EnvironmentStage(this, 'Prod', {
+      accountId: props.prodAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
       env: { account: props.prodAccountId, region: props.awsRegion },
@@ -131,17 +104,15 @@ export class ProductionPipelineStack extends cdk.Stack {
     this.pipeline.addStage(prodStage, {
       pre: [
         new pipelines.ManualApprovalStep('PromoteToProd', {
-          comment: 'Approve deployment to Production',
+          comment: 'Approve application deployment to Production',
         }),
       ],
     });
 
-    // Add CDK Nag suppressions for pipeline resources
     this.addNagSuppressions();
   }
 
   private addNagSuppressions(): void {
-    // Suppress CDK Nag warnings for pipeline-managed resources
     NagSuppressions.addStackSuppressions(this, [
       {
         id: 'AwsSolutions-IAM5',

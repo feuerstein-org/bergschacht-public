@@ -8,6 +8,7 @@ import { CentralLoggingBucketStack } from '../central-logging-bucket-stack';
 import { LambdaArtifactsStack } from '../lambda-artifacts-stack';
 import { EcrStack } from '../ecr-stack';
 import { SnsPagerDutyStack } from '../sns-pager-duty';
+import { ReadOnlyRoleStack } from '../readonly-role-stack';
 import { GitHubOIDCProviderStack } from '../github-oidc-provider-stack';
 import { GitHubActionsStack } from '../github-actions-stack';
 import { createApplicationRepoGitHubActions } from '../application-repo-github-actions-stack';
@@ -109,6 +110,7 @@ export class CicdStage extends cdk.Stage {
           effect: iam.Effect.ALLOW,
           actions: ['codepipeline:StartPipelineExecution'],
           resources: [
+            `arn:aws:codepipeline:${awsRegion}:${cicdAccountId}:BergschachtInfraPipeline`,
             `arn:aws:codepipeline:${awsRegion}:${cicdAccountId}:BergschachtProductionPipeline`,
           ],
         }),
@@ -199,5 +201,21 @@ export class CicdStage extends cdk.Stage {
         deploymentResourcesKmsKey: deploymentResourcesKmsKeyStack.key,
       });
     }
+
+    // --- Cross-account infrastructure for Dev and Prod ---
+    // These stacks deploy into the Dev/Prod accounts but are owned by the infra pipeline
+    // so the application pipeline doesn't need to redeploy them.
+
+    // ReadOnly Role for Dev account
+    new ReadOnlyRoleStack(this, 'DevReadOnlyRole', {
+      trustedArns: [cicdAccountId],
+      env: { account: devAccountId, region: awsRegion },
+    });
+
+    // ReadOnly Role for Prod account
+    new ReadOnlyRoleStack(this, 'ProdReadOnlyRole', {
+      trustedArns: [cicdAccountId],
+      env: { account: prodAccountId, region: awsRegion },
+    });
   }
 }
