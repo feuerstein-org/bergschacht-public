@@ -1,9 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { SharedKmsKeyStack } from '../shared-kms-key-stack';
 import { CentralLoggingBucketStack } from '../central-logging-bucket-stack';
 import { LambdaArtifactsStack } from '../lambda-artifacts-stack';
 import { EcrStack } from '../ecr-stack';
@@ -40,15 +38,17 @@ export interface CicdStageProps extends cdk.StageProps {
    * @default []
    */
   readonly applicationRepos?: ApplicationRepo[];
+  /**
+   * Shared KMS key ARN for encrypting deployment resources (ECR, S3, etc.).
+   */
+  readonly encryptionKeyArn: string;
 }
 
 /**
  * Stage containing all infrastructure stacks for CI/CD.
- * This includes shared resources like KMS keys, ECR repositories, and Lambda artifacts.
+ * This includes shared resources like ECR repositories, Lambda artifacts, and cross-account roles.
  */
 export class CicdStage extends cdk.Stage {
-  public readonly deploymentResourcesKmsKey: kms.IKey;
-
   constructor(scope: Construct, id: string, props: CicdStageProps) {
     super(scope, id, props);
 
@@ -57,26 +57,12 @@ export class CicdStage extends cdk.Stage {
 
     const { cicdAccountId, devAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
     const appRepos = props.applicationRepos ?? [];
+    const encryptionKeyArn = props.encryptionKeyArn;
 
     // GitHub OIDC Provider Stack - creates the OIDC provider once per account
     const githubOidcProviderStack = new GitHubOIDCProviderStack(this, 'GitHubOIDCProvider', {
       env: { account: cicdAccountId, region: awsRegion },
     });
-
-    // Create shared KMS key for ECR and Lambda artifacts in CI/CD account
-    const deploymentResourcesKmsKeyStack = new SharedKmsKeyStack(
-      this,
-      'DeploymentResourcesKmsKey',
-      {
-        kmsDescription: 'Shared KMS key for Deployment resources',
-        keyAlias: 'cicd-deployment-resources',
-        // TODO: These policies can be tightened and limited to specific ARNs
-        // Do it like with the ReadOnlyRoleStack trustedArns and specify the specific ARNs that need access
-        // Since it's only deployment artifacts this is not urgent
-        allowedDecryptAccountIds: [cicdAccountId, devAccountId, prodAccountId],
-        env: { account: cicdAccountId, region: awsRegion },
-      }
-    );
 
     // GitHub Actions Stack - sets up IAM roles for GitHub Actions to run CDK diff
     new GitHubActionsStack(this, 'FeuersteinBergschachtDevGitHubActions', {
@@ -151,7 +137,7 @@ export class CicdStage extends cdk.Stage {
           sid: 'AllowKmsForDeploymentResources',
           effect: iam.Effect.ALLOW,
           actions: ['kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey*'],
-          resources: [deploymentResourcesKmsKeyStack.key.keyArn],
+          resources: [encryptionKeyArn],
         }),
       ],
       env: { account: cicdAccountId, region: awsRegion },
@@ -164,10 +150,9 @@ export class CicdStage extends cdk.Stage {
       env: { account: cicdAccountId, region: awsRegion },
     });
 
-    // Create centralized logging bucket for CI/CD account
     const centralLoggingBucket = new CentralLoggingBucketStack(this, 'CentralLoggingBucket', {
       bucketName: 'example-cicd-logs',
-      encryptionKey: deploymentResourcesKmsKeyStack.key,
+      encryptionKeyArn,
       env: { account: cicdAccountId, region: awsRegion },
     });
 
@@ -175,7 +160,7 @@ export class CicdStage extends cdk.Stage {
     const lambdaArtifactsStack = new LambdaArtifactsStack(this, 'LambdaArtifacts', {
       bucketName: 'example-lambda-artifacts',
       allowedAccountIds: [devAccountId, prodAccountId],
-      encryptionKey: deploymentResourcesKmsKeyStack.key,
+      encryptionKeyArn,
       serverAccessLogsBucket: centralLoggingBucket.bucket,
       env: { account: cicdAccountId, region: awsRegion },
     });
@@ -185,7 +170,7 @@ export class CicdStage extends cdk.Stage {
       repositoryName: 'feuerstein',
       notificationTopic: snsPagerDutyStack.topic,
       allowedPullAccountIds: [devAccountId, prodAccountId],
-      encryptionKey: deploymentResourcesKmsKeyStack.key,
+      encryptionKeyArn,
       env: { account: cicdAccountId, region: awsRegion },
     });
 
@@ -198,7 +183,7 @@ export class CicdStage extends cdk.Stage {
         awsRegion,
         ecrRepository: ecrStack.repository,
         lambdaArtifactsBucket: lambdaArtifactsStack.bucket,
-        deploymentResourcesKmsKey: deploymentResourcesKmsKeyStack.key,
+        deploymentResourcesKmsKeyArn: encryptionKeyArn,
       });
     }
 

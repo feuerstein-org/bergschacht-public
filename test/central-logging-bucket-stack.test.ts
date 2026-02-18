@@ -1,15 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import { Template } from 'aws-cdk-lib/assertions';
 import { CentralLoggingBucketStack } from '../lib/central-logging-bucket-stack';
 
-/**
- * Helper function to create a mock KMS key for testing
- */
-function createMockKmsKey(app: cdk.App): kms.IKey {
-  const keyStack = new cdk.Stack(app, 'Key');
-  return new kms.Key(keyStack, 'TestKey');
-}
+const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 
 describe('CentralLoggingBucketStack', () => {
   let stack: CentralLoggingBucketStack;
@@ -17,10 +10,9 @@ describe('CentralLoggingBucketStack', () => {
 
   beforeEach(() => {
     const app = new cdk.App();
-    const encryptionKey = createMockKmsKey(app);
     stack = new CentralLoggingBucketStack(app, 'TestCentralLoggingBucket', {
       bucketName: 'test-central-logs',
-      encryptionKey,
+      encryptionKeyArn: TEST_KMS_KEY_ARN,
     });
     template = Template.fromStack(stack);
   });

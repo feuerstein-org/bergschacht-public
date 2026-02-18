@@ -1,6 +1,5 @@
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { GitHubActionsStack } from './github-actions-stack';
@@ -38,9 +37,9 @@ export interface ApplicationRepoGitHubActionsProps {
   readonly lambdaArtifactsBucket: s3.IBucket;
 
   /**
-   * KMS key used to encrypt ECR images and S3 objects
+   * ARN of the KMS key used to encrypt ECR images and S3 objects.
    */
-  readonly deploymentResourcesKmsKey: kms.IKey;
+  readonly deploymentResourcesKmsKeyArn: string;
 }
 
 /**
@@ -60,7 +59,7 @@ export function createApplicationRepoGitHubActions(
     awsRegion,
     ecrRepository,
     lambdaArtifactsBucket,
-    deploymentResourcesKmsKey,
+    deploymentResourcesKmsKeyArn,
   } = props;
 
   // Construct a PascalCase stack id from the repo name
@@ -124,7 +123,7 @@ export function createApplicationRepoGitHubActions(
         sid: 'AllowKmsForDeploymentResources',
         effect: iam.Effect.ALLOW,
         actions: ['kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey*'],
-        resources: [deploymentResourcesKmsKey.keyArn],
+        resources: [deploymentResourcesKmsKeyArn],
       }),
     ],
     env: { account: cicdAccountId, region: awsRegion },

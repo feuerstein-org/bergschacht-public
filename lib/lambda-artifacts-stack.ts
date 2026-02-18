@@ -11,9 +11,9 @@ export interface LambdaArtifactsStackProps extends cdk.StackProps {
    */
   readonly bucketName: string;
   /**
-   * Customer managed KMS key for encrypting bucket contents
+   * ARN of the customer managed KMS key for encrypting bucket contents.
    */
-  readonly encryptionKey: kms.IKey;
+  readonly encryptionKeyArn: string;
   /**
    * List of AWS account IDs that should be allowed to read and download from this bucket
    * @default - No cross-account access granted
@@ -37,7 +37,7 @@ export class LambdaArtifactsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: LambdaArtifactsStackProps) {
     super(scope, id, props);
 
-    this.encryptionKey = props.encryptionKey;
+    this.encryptionKey = kms.Key.fromKeyArn(this, 'EncryptionKey', props.encryptionKeyArn);
 
     // S3 bucket for Lambda artifacts
     this.bucket = new s3.Bucket(this, 'LambdaArtifactsBucket', {

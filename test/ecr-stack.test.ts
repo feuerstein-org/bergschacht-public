@@ -1,28 +1,19 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { EcrStack } from '../lib/ecr-stack';
 
-/**
- * Helper function to create a mock KMS key for testing
- */
-function createMockKmsKey(app: cdk.App): kms.IKey {
-  const keyStack = new cdk.Stack(app, 'Key');
-  return new kms.Key(keyStack, 'TestKey');
-}
+const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 
 describe('EcrStack', () => {
   let stack: EcrStack;
   let template: Template;
-  let encryptionKey: kms.IKey;
 
   beforeEach(() => {
     const app = new cdk.App();
-    encryptionKey = createMockKmsKey(app);
     stack = new EcrStack(app, 'TestEcr', {
       repositoryName: 'test-repository',
-      encryptionKey,
+      encryptionKeyArn: TEST_KMS_KEY_ARN,
     });
     template = Template.fromStack(stack);
   });
@@ -45,7 +36,7 @@ describe('EcrStack', () => {
     template.hasResourceProperties('AWS::ECR::Repository', {
       EncryptionConfiguration: {
         EncryptionType: 'KMS',
-        KmsKey: stack.resolve(encryptionKey.keyArn),
+        KmsKey: TEST_KMS_KEY_ARN,
       },
     });
   });
@@ -85,11 +76,10 @@ describe('EcrStack', () => {
 
     beforeEach(() => {
       const app = new cdk.App();
-      const encryptionKey = createMockKmsKey(app);
       const stack = new EcrStack(app, 'TestEcrMutableTag', {
         repositoryName: 'test-repository',
         mutableTagWildcard: '*latest',
-        encryptionKey,
+        encryptionKeyArn: TEST_KMS_KEY_ARN,
       });
       templateWithMutableTag = Template.fromStack(stack);
     });
@@ -112,11 +102,10 @@ describe('EcrStack', () => {
 
     beforeEach(() => {
       const app = new cdk.App();
-      const encryptionKey = createMockKmsKey(app);
       const stack = new EcrStack(app, 'TestEcrCrossAccount', {
         repositoryName: 'test-repository',
         allowedPullAccountIds: ['11111111111', '222222222222'],
-        encryptionKey,
+        encryptionKeyArn: TEST_KMS_KEY_ARN,
       });
       templateWithCrossAccount = Template.fromStack(stack);
     });
@@ -165,11 +154,10 @@ describe('EcrStack', () => {
       topic = new sns.Topic(topicStack, 'TestTopic', {
         topicName: 'test-topic',
       });
-      const encryptionKey = createMockKmsKey(notificationApp);
       stackWithNotifications = new EcrStack(notificationApp, 'TestEcrWithNotifications', {
         repositoryName: 'test-repository',
         notificationTopic: topic,
-        encryptionKey,
+        encryptionKeyArn: TEST_KMS_KEY_ARN,
       });
       templateWithNotifications = Template.fromStack(stackWithNotifications);
     });

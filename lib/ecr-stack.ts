@@ -31,9 +31,10 @@ export interface EcrStackProps extends cdk.StackProps {
    */
   readonly mutableTagWildcard?: string;
   /**
-   * Customer managed KMS key for encrypting repository images
+   * ARN of the KMS key for encrypting repository images.
+   * The key is imported internally via Key.fromKeyArn.
    */
-  readonly encryptionKey: kms.IKey;
+  readonly encryptionKeyArn: string;
 }
 
 /**
@@ -46,8 +47,7 @@ export class EcrStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: EcrStackProps) {
     super(scope, id, props);
 
-    // Create or use provided KMS key for repository encryption
-    this.encryptionKey = props.encryptionKey;
+    this.encryptionKey = kms.Key.fromKeyArn(this, 'EncryptionKey', props.encryptionKeyArn);
 
     // Create ECR repository
     this.repository = new ecr.Repository(this, 'Repository', {

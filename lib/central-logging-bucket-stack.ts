@@ -12,9 +12,9 @@ export interface CentralLoggingBucketStackProps extends cdk.StackProps {
    */
   readonly bucketName: string;
   /**
-   * Customer managed KMS key for encrypting bucket contents
+   * ARN of the customer managed KMS key for encrypting bucket contents.
    */
-  readonly encryptionKey: kms.IKey;
+  readonly encryptionKeyArn: string;
 }
 
 /**
@@ -28,7 +28,7 @@ export class CentralLoggingBucketStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: CentralLoggingBucketStackProps) {
     super(scope, id, props);
 
-    this.encryptionKey = props.encryptionKey;
+    this.encryptionKey = kms.Key.fromKeyArn(this, 'EncryptionKey', props.encryptionKeyArn);
 
     // S3 bucket for storing access logs
     this.bucket = new s3.Bucket(this, 'CentralLoggingBucket', {

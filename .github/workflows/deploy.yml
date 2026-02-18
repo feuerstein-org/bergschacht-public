@@ -34,6 +34,7 @@ permissions:
 
 env:
   ROLE_NAME: ${{ github.event.repository.name }}-prod-github-actions-role
+  MISE_OVERRIDE_CONFIG_FILENAMES: 'mise.ci.toml'
 
 jobs:
   # Synth CDK templates and compare checksums to detect real changes.

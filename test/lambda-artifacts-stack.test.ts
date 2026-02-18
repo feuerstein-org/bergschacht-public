@@ -1,16 +1,9 @@
 import * as cdk from 'aws-cdk-lib/core';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { LambdaArtifactsStack } from '../lib/lambda-artifacts-stack';
 
-/**
- * Helper function to create a mock KMS key for testing
- */
-function createMockKmsKey(app: cdk.App): kms.IKey {
-  const keyStack = new cdk.Stack(app, 'Key');
-  return new kms.Key(keyStack, 'TestKey');
-}
+const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 
 describe('LambdaArtifactsStack', () => {
   let stack: LambdaArtifactsStack;
@@ -18,10 +11,9 @@ describe('LambdaArtifactsStack', () => {
 
   beforeEach(() => {
     const app = new cdk.App();
-    const encryptionKey = createMockKmsKey(app);
     stack = new LambdaArtifactsStack(app, 'TestLambdaArtifacts', {
       bucketName: 'test-lambda-artifacts',
-      encryptionKey,
+      encryptionKeyArn: TEST_KMS_KEY_ARN,
     });
     template = Template.fromStack(stack);
   });
@@ -142,11 +134,10 @@ describe('LambdaArtifactsStack', () => {
 
     beforeEach(() => {
       const app = new cdk.App();
-      const encryptionKey = createMockKmsKey(app);
       const stack = new LambdaArtifactsStack(app, 'TestLambdaArtifactsCrossAccount', {
         bucketName: 'test-lambda-artifacts',
         allowedAccountIds: ['111111111111', '222222222222'],
-        encryptionKey,
+        encryptionKeyArn: TEST_KMS_KEY_ARN,
       });
       templateWithCrossAccount = Template.fromStack(stack);
     });
@@ -188,7 +179,6 @@ describe('LambdaArtifactsStack', () => {
   describe('with server access logging', () => {
     test('accepts a serverAccessLogsBucket parameter', () => {
       const app = new cdk.App();
-      const encryptionKey = createMockKmsKey(app);
 
       // Create a logging bucket in the same stack
       const stack = new cdk.Stack(app, 'TestLambdaArtifactsWithLogging');
@@ -200,7 +190,6 @@ describe('LambdaArtifactsStack', () => {
       new s3.Bucket(stack, 'LambdaArtifactsBucket', {
         bucketName: 'test-lambda-artifacts-with-logging',
         encryption: s3.BucketEncryption.KMS,
-        encryptionKey,
         serverAccessLogsBucket: loggingBucket,
         serverAccessLogsPrefix: 'lambda-artifacts/',
       });

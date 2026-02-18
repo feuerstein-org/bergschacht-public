@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as pipelines from 'aws-cdk-lib/pipelines';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { CicdStage } from './stages/cicd-stage';
@@ -49,6 +51,11 @@ export interface InfraPipelineStackProps extends cdk.StackProps {
    * @default []
    */
   readonly applicationRepos?: ApplicationRepo[];
+  /**
+   * ARN (or alias ARN) of the shared KMS key for encrypting pipeline artifacts.
+   * @example 'arn:aws:kms:us-east-1:123456789012:alias/cicd-shared'
+   */
+  readonly encryptionKeyArn: string;
 }
 
 /**
@@ -67,13 +74,27 @@ export class InfraPipelineStack extends cdk.Stack {
 
     const branch = props.branch ?? 'master';
 
-    // Create the CodePipeline V2 pipeline
+    const encryptionKey = kms.Key.fromKeyArn(this, 'SharedEncryptionKey', props.encryptionKeyArn);
+
+    // Create artifact bucket encrypted with the shared KMS key
+    const artifactBucket = new s3.Bucket(this, 'ArtifactsBucket', {
+      bucketName: cdk.PhysicalName.GENERATE_IF_NEEDED,
+      encryptionKey,
+      encryption: s3.BucketEncryption.KMS,
+      bucketKeyEnabled: true,
+      versioned: true,
+      enforceSSL: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
+    // Create the CodePipeline V2 pipeline with shared KMS key
     const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineInfra', {
       pipelineName: 'BergschachtInfraPipeline',
       pipelineType: codepipeline.PipelineType.V2,
-      // Cross-account keys are required for cross-account deployments
-      // Potentially we want to reuse the same key we use for other CICD resources
-      crossAccountKeys: true,
+      artifactBucket,
+      crossAccountKeys: false,
       restartExecutionOnUpdate: true,
     });
 
@@ -108,6 +129,7 @@ export class InfraPipelineStack extends cdk.Stack {
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
       applicationRepos: props.applicationRepos,
+      encryptionKeyArn: props.encryptionKeyArn,
       env: { account: props.cicdAccountId, region: props.awsRegion },
     });
     this.pipeline.addStage(cicdStage);

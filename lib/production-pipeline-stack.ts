@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as pipelines from 'aws-cdk-lib/pipelines';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { EnvironmentStage } from './stages/environment-stage';
@@ -39,6 +41,11 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
    * Email address for PagerDuty alerts
    */
   readonly pagerDutyEmail: string;
+  /**
+   * ARN (or alias ARN) of the shared KMS key for encrypting pipeline artifacts.
+   * @example 'arn:aws:kms:us-east-1:123456789012:alias/cicd-shared'
+   */
+  readonly encryptionKeyArn: string;
 }
 
 /**
@@ -57,10 +64,27 @@ export class ProductionPipelineStack extends cdk.Stack {
 
     const branch = props.branch ?? 'master';
 
+    // Import the shared KMS key from ARN for pipeline artifact encryption
+    const encryptionKey = kms.Key.fromKeyArn(this, 'SharedEncryptionKey', props.encryptionKeyArn);
+
+    // Create artifact bucket encrypted with the shared KMS key
+    const artifactBucket = new s3.Bucket(this, 'ArtifactsBucket', {
+      bucketName: cdk.PhysicalName.GENERATE_IF_NEEDED,
+      encryptionKey,
+      encryption: s3.BucketEncryption.KMS,
+      bucketKeyEnabled: true,
+      versioned: true,
+      enforceSSL: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
     const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineProduction', {
       pipelineName: 'BergschachtProductionPipeline',
       pipelineType: codepipeline.PipelineType.V2,
-      crossAccountKeys: true,
+      artifactBucket,
+      crossAccountKeys: false,
       restartExecutionOnUpdate: true,
     });
 

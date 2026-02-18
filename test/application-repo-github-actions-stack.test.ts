@@ -1,10 +1,11 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { GitHubOIDCProviderStack } from '../lib/github-oidc-provider-stack';
 import { createApplicationRepoGitHubActions } from '../lib/application-repo-github-actions-stack';
+
+const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 
 describe('createApplicationRepoGitHubActions', () => {
   let app: cdk.App;
@@ -16,7 +17,6 @@ describe('createApplicationRepoGitHubActions', () => {
     app = new cdk.App();
     const oidcStack = new GitHubOIDCProviderStack(app, 'OIDCProvider', { env: testEnv });
     const sharedStack = new cdk.Stack(app, 'Shared', { env: testEnv });
-    const key = new kms.Key(sharedStack, 'TestKey');
     const bucket = new s3.Bucket(sharedStack, 'TestBucket', {
       bucketName: 'example-lambda-artifacts',
     });
@@ -35,7 +35,7 @@ describe('createApplicationRepoGitHubActions', () => {
       awsRegion: 'us-east-1',
       ecrRepository: repository,
       lambdaArtifactsBucket: bucket,
-      deploymentResourcesKmsKey: key,
+      deploymentResourcesKmsKeyArn: TEST_KMS_KEY_ARN,
     });
 
     template = Template.fromStack(stack);
@@ -149,7 +149,7 @@ describe('createApplicationRepoGitHubActions', () => {
       awsRegion: 'us-east-1',
       ecrRepository: new ecr.Repository(shared, 'Repo', { repositoryName: 'feuerstein' }),
       lambdaArtifactsBucket: new s3.Bucket(shared, 'Bucket', { bucketName: 'artifacts' }),
-      deploymentResourcesKmsKey: new kms.Key(shared, 'Key'),
+      deploymentResourcesKmsKeyArn: TEST_KMS_KEY_ARN,
     });
 
     expect(stack.stackName).toContain('MyAppGitHubActions');
