@@ -1,0 +1,5 @@
+{
+  "key-provider:account=111111111111:aliasName=alias/cicd-shared:region=us-east-1": {
+    "keyId": "11111111-2222-3333-4444-555555555555"
+  }
+}

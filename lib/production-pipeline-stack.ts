@@ -42,10 +42,10 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
    */
   readonly pagerDutyEmail: string;
   /**
-   * ARN (or alias ARN) of the shared KMS key for encrypting pipeline artifacts.
-   * @example 'arn:aws:kms:us-east-1:123456789012:alias/cicd-shared'
+   * KMS key alias for the shared deployment encryption key
+   * @example 'alias/cicd-shared'
    */
-  readonly encryptionKeyArn: string;
+  readonly encryptionKeyAlias: string;
 }
 
 /**
@@ -64,8 +64,10 @@ export class ProductionPipelineStack extends cdk.Stack {
 
     const branch = props.branch ?? 'master';
 
-    // Import the shared KMS key from ARN for pipeline artifact encryption
-    const encryptionKey = kms.Key.fromKeyArn(this, 'SharedEncryptionKey', props.encryptionKeyArn);
+    // Look up the shared KMS key by alias at synth time (resolves to a concrete ARN)
+    const encryptionKey = kms.Key.fromLookup(this, 'SharedEncryptionKey', {
+      aliasName: props.encryptionKeyAlias,
+    });
 
     // Create artifact bucket encrypted with the shared KMS key
     const artifactBucket = new s3.Bucket(this, 'ArtifactsBucket', {

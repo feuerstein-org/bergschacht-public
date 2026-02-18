@@ -150,6 +150,7 @@ export class CicdStage extends cdk.Stage {
       env: { account: cicdAccountId, region: awsRegion },
     });
 
+    // Create centralized logging bucket for CI/CD account
     const centralLoggingBucket = new CentralLoggingBucketStack(this, 'CentralLoggingBucket', {
       bucketName: 'example-cicd-logs',
       encryptionKeyArn,

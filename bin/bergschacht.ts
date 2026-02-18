@@ -22,6 +22,8 @@ const app = new cdk.App();
 // Add CDK Nag checks to all stacks
 cdk.Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
 
+const keyAlias = 'alias/cicd-shared';
+
 /**
  * Shared KMS Key Stack
  * A single KMS key used by all pipelines (artifact encryption) and deployment
@@ -32,13 +34,11 @@ cdk.Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
  */
 const sharedKmsKeyStack = new SharedKmsKeyStack(app, 'SharedKmsKey', {
   kmsDescription: 'Shared KMS key for all pipeline artifacts and deployment resources',
-  keyAlias: 'cicd-shared',
+  keyAlias: keyAlias,
   allowedDecryptAccountIds: [cicdAccount, devAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
   description: 'Shared KMS key for pipeline artifacts and deployment resources',
 });
-
-const sharedKmsKeyAliasArn = `arn:aws:kms:${awsRegion}:${cicdAccount}:alias/cicd-shared`;
 
 /**
  * Infrastructure Pipeline Stack
@@ -56,7 +56,7 @@ const infraPipeline = new InfraPipelineStack(app, 'InfraPipeline', {
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
   applicationRepos: applicationRepos,
-  encryptionKeyArn: sharedKmsKeyAliasArn,
+  encryptionKeyAlias: keyAlias,
   env: { account: cicdAccount, region: awsRegion },
   description: 'CDK Pipeline for infrastructure deployments',
 });
@@ -77,7 +77,7 @@ const productionPipeline = new ProductionPipelineStack(app, 'ProductionPipeline'
   prodAccountId: prodAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
-  encryptionKeyArn: sharedKmsKeyAliasArn,
+  encryptionKeyAlias: keyAlias,
   env: { account: cicdAccount, region: awsRegion },
   description: 'CDK Pipeline for application deployments (version manifest driven)',
 });
@@ -95,7 +95,7 @@ const developmentPipeline = new DevelopmentPipelineStack(app, 'DevelopmentPipeli
   devAccountId: devAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
-  encryptionKeyArn: sharedKmsKeyAliasArn,
+  encryptionKeyAlias: keyAlias,
   env: { account: cicdAccount, region: awsRegion },
   description: 'CDK Pipeline for development deployments (Dev only, feature branches)',
 });
