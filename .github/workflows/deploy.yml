@@ -169,7 +169,7 @@ jobs:
 
   deploy-infra:
     needs: resolve
-    if: needs.resolve.outputs.trigger_infra == 'true'
+    if: always() && needs.resolve.outputs.trigger_infra == 'true'
     runs-on: ubuntu-latest
     environment:
       name: prod
@@ -189,7 +189,7 @@ jobs:
 
   deploy-prod:
     needs: resolve
-    if: needs.resolve.outputs.trigger_prod == 'true'
+    if: always() && needs.resolve.outputs.trigger_prod == 'true'
     runs-on: ubuntu-latest
     environment:
       name: prod
