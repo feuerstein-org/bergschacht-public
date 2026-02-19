@@ -10,7 +10,7 @@ import { ReadOnlyRoleStack } from '../readonly-role-stack';
 import { GitHubOIDCProviderStack } from '../github-oidc-provider-stack';
 import { GitHubActionsStack } from '../github-actions-stack';
 import { createApplicationRepoGitHubActions } from '../application-repo-github-actions-stack';
-import { ApplicationRepo } from '../constants';
+import { ApplicationRepo, ssmPrefix } from '../constants';
 
 export interface CicdStageProps extends cdk.StageProps {
   /**
@@ -139,6 +139,13 @@ export class CicdStage extends cdk.Stage {
           actions: ['kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey*'],
           resources: [encryptionKeyArn],
         }),
+        // Permission to read version manifest from SSM during CDK synth
+        new iam.PolicyStatement({
+          sid: 'AllowSsmReadVersionManifest',
+          effect: iam.Effect.ALLOW,
+          actions: ['ssm:GetParameter', 'ssm:GetParametersByPath'],
+          resources: [`arn:aws:ssm:${awsRegion}:${cicdAccountId}:parameter/${ssmPrefix}/*`],
+        }),
       ],
       env: { account: cicdAccountId, region: awsRegion },
     });
@@ -185,6 +192,7 @@ export class CicdStage extends cdk.Stage {
         ecrRepository: ecrStack.repository,
         lambdaArtifactsBucket: lambdaArtifactsStack.bucket,
         deploymentResourcesKmsKeyArn: encryptionKeyArn,
+        ssmPrefix,
       });
     }
 

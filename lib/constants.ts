@@ -16,6 +16,9 @@ export const pagerDutyEmail =
 export const githubOrg = process.env.GITHUB_ORG || 'feuerstein-org';
 export const githubRepo = process.env.GITHUB_REPO || 'bergschacht';
 
+/** SSM parameter prefix used for version manifest storage (without leading slash). */
+export const ssmPrefix = githubRepo;
+
 /**
  * Application repository configuration.
  * Each entry defines a GitHub repo that is allowed to push artifacts (Docker images / Lambda packages)

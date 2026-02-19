@@ -65,8 +65,8 @@ infraPipeline.addDependency(sharedKmsKeyStack);
 /**
  * Production Pipeline Stack
  * Dev -> Prod (no CICD stage)
- * Deploys application workloads that consume the version manifest.
- * Triggered when version-manifests/ or app stage code changes.
+ * Deploys application workloads that consume the version manifest from SSM.
+ * Triggered by application repos after they update SSM parameters.
  */
 const productionPipeline = new ProductionPipelineStack(app, 'ProductionPipeline', {
   githubOwner: githubOrg,

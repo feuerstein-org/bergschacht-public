@@ -26,9 +26,3 @@ repos:
         entry: 'pnpm run lint'
         language: system
         pass_filenames: false
-
-      - id: validate-version-manifests
-        name: validate version manifests
-        entry: bash -c 'find version-manifests/ -name "*.json" ! -name "*.schema.json" -exec pnpm exec ajv validate -s version-manifests/version-manifest.schema.json -d {} --spec=draft2020 \;'
-        language: system
-        pass_filenames: false

@@ -51,9 +51,10 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
 /**
  * CDK Pipeline for production application deployments.
  * This pipeline deploys application workloads (ECS services, Lambda functions, etc.)
- * that consume the version manifest. It deploys to Dev -> Prod only (no CICD stage needed).
+ * that consume the version manifest from SSM Parameter Store.
+ * It deploys to Dev -> Prod only (no CICD stage needed).
  *
- * Triggered by GitHub Actions when version-manifests/ or application stage code changes.
+ * Triggered by application repos after they update SSM, or by code changes.
  * Infrastructure changes (KMS, ECR, OIDC, etc.) are handled by InfraPipelineStack.
  */
 export class ProductionPipelineStack extends cdk.Stack {

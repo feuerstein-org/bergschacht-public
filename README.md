@@ -1,6 +1,6 @@
 # Bergschacht
 
-CDK infrastructure for Feuerstein. Application packages live in separate repositories and deploy their artifacts (Docker images, Lambda packages) to AWS. After deployment, they send a `repository_dispatch` event to this repo, which updates the version manifest and triggers a CDK deployment. This documentation describes how the application code is deployed as well.
+CDK infrastructure for Feuerstein. Application packages live in separate repositories and deploy their artifacts (Docker images, Lambda packages) to AWS. After deployment, they update the version manifest in SSM Parameter Store and trigger the CDK production pipeline directly. This documentation describes how the application code is deployed as well.
 
 ## Architecture
 
@@ -11,19 +11,21 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
 └───────────┬─────────────┘     └───────────┬─────────────┘
             │                               │
             │ 1. Deploy Docker/Lambda       │
-            │ 2. repository_dispatch        │
+            │ 2. Update SSM Parameter Store │
+            │ 3. Dispatch CDK deploy.yml    │
             │                               │
             ▼                               ▼
 ┌─────────────────────────────────────────────────────────┐
+│               AWS SSM Parameter Store                   │
+│      /{ssmPrefix}/{repo}/images/{name}  → {JSON}        │
+│      /{ssmPrefix}/{repo}/lambdas/{name} → {JSON}        │
+└──────────────────────────┬──────────────────────────────┘
+                           │ Read at CDK synth time
+                           │ (valueFromLookup)
+                           ▼
+┌─────────────────────────────────────────────────────────┐
 │                  Bergschacht (CDK Repo)                 │
 │                                                         │
-│  update-manifest.yml                                    │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ 1. Run update_version_manifest.py (version check)│   │
-│  │ 2. Commit updated latest.json                    │   │
-│  └──────────────────┬───────────────────────────────┘   │
-│                     │                                   │
-│                     ▼                                   │
 │  deploy.yml                                             │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │ 1. Synth CDK & compare template checksums        │   │
@@ -58,16 +60,10 @@ bergschacht/
 │       ├── cicd-stage.ts         # Shared infra (KMS, ECR, OIDC, logging, cross-account)
 │       └── environment-stage.ts  # App workloads (ECS, Lambda) parameterized by account
 ├── test/                     # Infrastructure tests
-├── version-manifests/        # Version manifests
-│   ├── latest.json           # Current deployed versions
-│   └── version-manifest.schema.json
 └── .github/
-    ├── scripts/
-    │   └── update_version_manifest.py  # Updates manifest with version check
     └── workflows/
         ├── test.yml              # PR testing workflow
-        ├── deploy.yml            # Synth-based change detection & pipeline triggering
-        └── update-manifest.yml   # Receives dispatch events from app repos
+        └── deploy.yml            # Synth-based change detection & pipeline triggering
 ```
 
 ## Getting started
@@ -255,14 +251,19 @@ For non-workspace repos (single `pyproject.toml` at root), everything works the 
 
 ### Version Management
 
-Application versions are tracked in `version-manifests/latest.json`.
+Application artifact versions are stored in **AWS SSM Parameter Store**. Each artifact is a single JSON-valued parameter for atomic reads and writes:
+
+- `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` → `{"bucket","key","version","commitSha"}`
+- `/{ssmPrefix}/{repoName}/images/{artifactName}` → `{"repository","imageTag","version","commitSha"}`
+
+The `ssmPrefix` is defined in `lib/constants.ts` and defaults to the CDK repo name (`bergschacht`).
 
 ### How it works
 
 1. **Application repos** build and push Docker images / Lambda packages to AWS
-2. They send a `repository_dispatch` event to this repo with deployment metadata (each artifact includes its own version)
-3. The `update-manifest.yml` workflow runs `update_version_manifest.py`, which only updates the manifest if the version is newer than the existing one
-4. The manifest commit triggers `deploy.yml` with `pipeline: prod`, which directly triggers the **Production Pipeline** (skipping synth-based detection)
+2. They write artifact metadata to SSM Parameter Store (one JSON parameter per artifact), but only if the version is newer than the existing one
+3. They dispatch the CDK repo's `deploy.yml` workflow with `pipeline: prod` via a GitHub App token
+4. The CDK repo's `deploy.yml` triggers the **Production Pipeline**, which reads the latest artifact versions from SSM at synth time via `valueFromLookup`
 
 For infrastructure changes pushed to `master`, `deploy.yml` runs `cdk synth`, compares template checksums against cached values, and only triggers the **Infra Pipeline** and/or **Production Pipeline** if their templates actually changed.
 
@@ -270,37 +271,33 @@ For infrastructure changes pushed to `master`, `deploy.yml` runs `cdk synth`, co
 
 ### Rollback
 
-- **Specific artifact**: Revert the version manifest commit or make a new commit to the version manifest.
+- **Specific artifact**: Update the SSM parameter to the previous version's JSON, then re-trigger the Production Pipeline.
 - **CDK stage**: Revert to a specific execution ID in CodePipeline or revert to a previous commit in this repo.
 - **Manual re-trigger**: Use `workflow_dispatch` on `deploy.yml` to select `infra`, `prod`, or `all` to force-trigger specific pipelines.
 
-### Version Manifest Structure
+### SSM Parameter Structure
+
+Each artifact is stored as a single JSON-valued SSM parameter. This ensures atomic updates (no partial writes) and fewer API calls.
+
+**Lambda artifact** (`/{ssmPrefix}/{repo}/lambdas/{artifactName}`):
 
 ```json
 {
-  "$schema": "./version-manifest.schema.json",
-  "schemaVersion": "1.0.0",
-  "repositories": {
-    "sample-python-repo": {
-      "source": "feuerstein/sample-python-repo",
-      "images": {
-        "sample-python-repo": {
-          "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-          "imageTag": "sample-python-repo-0.1.0",
-          "version": "0.1.0",
-          "commitSha": "abc123..."
-        }
-      },
-      "lambdas": {
-        "sample-python-repo": {
-          "bucket": "example-lambda-artifacts",
-          "key": "sample-python-repo/sample-python-repo-0.1.0.zip",
-          "version": "0.1.0",
-          "commitSha": "abc123..."
-        }
-      }
-    }
-  }
+  "bucket": "example-lambda-artifacts",
+  "key": "sample-python-repo/sample-python-repo-0.1.0.zip",
+  "version": "0.1.0",
+  "commitSha": "abc123..."
+}
+```
+
+**Container image artifact** (`/{ssmPrefix}/{repo}/images/{artifactName}`):
+
+```json
+{
+  "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+  "imageTag": "sample-python-repo-sample-python-repo-0.1.0",
+  "version": "0.1.0",
+  "commitSha": "abc123..."
 }
 ```
 
@@ -325,16 +322,12 @@ For infrastructure changes pushed to `master`, `deploy.yml` runs `cdk synth`, co
 ### Usage in CDK Stacks
 
 ```typescript
-import {
-  getLambdaArtifact,
-  getImageArtifact,
-  getRepositoryDeploymentTypes,
-} from '../lib/version-manifest';
+import { getLambdaArtifact, getImageArtifact } from '../lib/version-manifest';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 
-// Get Lambda package configuration. Pass repo and artifact name.
-const lambdaConfig = getLambdaArtifact('order-processor', 'order-processor');
+// Get Lambda package configuration. Pass scope (this), repo name, and artifact name.
+const lambdaConfig = getLambdaArtifact(this, 'order-processor', 'order-processor');
 
 new lambda.Function(this, 'OrderProcessor', {
   code: lambda.Code.fromBucket(
@@ -344,17 +337,14 @@ new lambda.Function(this, 'OrderProcessor', {
   // ... other configuration
 });
 
-const lambdaConfig = getImageArtifact('order-processor', 'order-processor');
+// Get image artifact
+const imageConfig = getImageArtifact(this, 'order-processor', 'order-processor');
 // Use imageConfig.repository and imageConfig.imageTag
 
 // Multi-artifact repo: get specific named artifacts
-const workerImage = getImageArtifact('order-service', 'worker');
-const apiImage = getImageArtifact('order-service', 'api');
-const webhookLambda = getLambdaArtifact('order-service', 'webhook');
-
-// Check deployment types for a repository
-const types = getRepositoryDeploymentTypes('dual-deploy-service');
-// Returns: ['lambda', 'image']
+const workerImage = getImageArtifact(this, 'order-service', 'worker');
+const apiImage = getImageArtifact(this, 'order-service', 'api');
+const webhookLambda = getLambdaArtifact(this, 'order-service', 'webhook');
 ```
 
 ## Deployment Model
@@ -411,7 +401,7 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 
 ### Production Pipeline (`ProductionPipelineStack`)
 
-- **Triggered by**: `deploy.yml` when application templates change, or directly by `update-manifest.yml` after a version manifest update
+- **Triggered by**: `deploy.yml` when application templates change, or via `workflow_dispatch` from application repos after an SSM version manifest update
 - **AWS Pipeline Name**: `BergschachtProductionPipeline`
 - **Deployment stages**:
   1. **Dev Account** (`EnvironmentStage`) — Development environment application workloads
@@ -498,7 +488,7 @@ This stack creates the CDK Pipeline for application deployments:
 - Creates a CodePipeline V2 pipeline (`BergschachtProductionPipeline`) with CodeConnections GitHub connection
 - Deploys `EnvironmentStage` to Dev → Prod accounts in sequence
 - Includes manual approval step before Prod deployment
-- Triggered by GitHub Actions when application templates or version manifests change
+- Triggered by GitHub Actions when application templates or version manifest SSM parameters change
 
 ### DevelopmentPipelineStack
 

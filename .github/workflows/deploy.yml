@@ -7,7 +7,6 @@ on:
     paths:
       - 'lib/**'
       - 'bin/**'
-      - 'version-manifests/**'
   workflow_dispatch:
     inputs:
       pipeline:
@@ -62,28 +61,20 @@ jobs:
       - name: Compute template checksums
         id: checksums
         run: |
-          # Hash all CloudFormation templates grouped by pipeline prefix
-          # Template files follow the pattern: <PipelineId>-<Stage>-<Stack><hash>.template.json
+          # Hash all CloudFormation templates grouped by pipeline.
+          # Includes both the pipeline stack templates AND the nested stage
+          # assembly templates (e.g. assembly-InfraPipeline-CicdStage/*.template.json)
+          # so that changes to application stacks are detected too.
           cd cdk.out
 
-          INFRA_HASH=""
-          PROD_HASH=""
+          pipeline_hash() {
+            local prefix="$1"
+            find . \( -name "${prefix}*.template.json" -o -path "./assembly-${prefix}*/*.template.json" \) \
+              -print0 | sort -z | xargs -0 sha256sum 2>/dev/null
+          }
 
-          for f in *.template.json; do
-            [ -f "$f" ] || continue
-            case "$f" in
-              InfraPipeline*)
-                INFRA_HASH="${INFRA_HASH}$(sha256sum "$f")"
-                ;;
-              ProductionPipeline*)
-                PROD_HASH="${PROD_HASH}$(sha256sum "$f")"
-                ;;
-            esac
-          done
-
-          # Produce a single hash per pipeline (hash of hashes)
-          echo "infra=$(echo "$INFRA_HASH" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "prod=$(echo "$PROD_HASH" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "infra=$(pipeline_hash InfraPipeline | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "prod=$(pipeline_hash ProductionPipeline | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore previous checksums
         id: cache-restore
