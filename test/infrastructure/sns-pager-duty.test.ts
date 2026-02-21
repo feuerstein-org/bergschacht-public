@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
-import { SnsPagerDutyStack } from '../lib/sns-pager-duty';
+import { SnsPagerDutyStack } from '../../lib/infrastructure/sns-pager-duty';
 
 describe('SnsPagerDutyStack', () => {
   let template: Template;

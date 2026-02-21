@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import { getLambdaArtifact, getImageArtifact, SSM_PREFIX } from '../lib/version-manifest';
+import { getLambdaArtifact, getImageArtifact, SSM_PREFIX } from '../../lib/config/version-manifest';
 
 /**
  * SSM parameter store contents used across tests.

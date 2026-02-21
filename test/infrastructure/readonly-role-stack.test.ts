@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
-import { ReadOnlyRoleStack } from '../lib/readonly-role-stack';
+import { ReadOnlyRoleStack } from '../../lib/infrastructure/readonly-role-stack';
 
 describe('ReadOnlyRoleStack', () => {
   let template: Template;

@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { EcrStack } from '../lib/ecr-stack';
+import { EcrStack } from '../../lib/infrastructure/ecr-stack';
 
 const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 

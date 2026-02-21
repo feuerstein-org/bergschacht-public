@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { SnsPagerDutyStack } from '../sns-pager-duty';
+import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty';
 
 export interface EnvironmentStageProps extends cdk.StageProps {
   /**

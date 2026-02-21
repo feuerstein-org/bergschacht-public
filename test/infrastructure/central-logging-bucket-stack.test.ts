@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
-import { CentralLoggingBucketStack } from '../lib/central-logging-bucket-stack';
+import { CentralLoggingBucketStack } from '../../lib/infrastructure/central-logging-bucket-stack';
 
 const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 

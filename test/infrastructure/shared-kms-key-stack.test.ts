@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { SharedKmsKeyStack } from '../lib/shared-kms-key-stack';
+import { SharedKmsKeyStack } from '../../lib/infrastructure/shared-kms-key-stack';
 
 describe('SharedKmsKeyStack', () => {
   let stack: SharedKmsKeyStack;
