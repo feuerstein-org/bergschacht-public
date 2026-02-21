@@ -32,25 +32,16 @@ run = "pnpm run cdk synth"
 description = "Build & synthesize stacks (defaults to all with '**', or pass stack names)"
 depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to synth (defaults to ** for all)"'
-run = '''
-stacks="${usage_stacks:-**}"
-pnpm run cdk synth "$stacks"
-'''
+run = 'pnpm run cdk synth ${usage_stacks:-"**"}'
 
 [tasks.diff]
 description = "Build & see diff for stacks (defaults to all with '**', or pass stack names)"
 depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to diff (defaults to ** for all)"'
-run = '''
-stacks="${usage_stacks:-**}"
-pnpm run cdk diff "$stacks"
-'''
+run = 'pnpm run cdk diff ${usage_stacks:-"**"}'
 
 [tasks.deploy]
 description = "Deploy stacks (defaults to all with '**', or pass stack names)"
 depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to deploy (defaults to ** for all)"'
-run = '''
-stacks="${usage_stacks:-**}"
-pnpm run cdk deploy "$stacks"
-'''
+run = 'pnpm run cdk deploy ${usage_stacks:-"**"}'
