@@ -56,7 +56,9 @@ bergschacht/
 ├── mise.ci.toml              # CI-specific tasks
 ├── bin/                      # CDK app entry point
 ├── lib/                      # Stack definitions
-│   └── stages/
+│   ├── config/               # Configuration (constants, version manifest)
+│   ├── infrastructure/       # Shared infrastructure stacks
+│   └── pipeline/             # Pipeline and stage stacks
 │       ├── cicd-stage.ts         # Shared infra (KMS, ECR, OIDC, logging, cross-account)
 │       └── environment-stage.ts  # App workloads (ECS, Lambda) parameterized by account
 ├── test/                     # Infrastructure tests
@@ -79,7 +81,7 @@ mise run install # This will install pnpm, pre-commit etc.
 
 ### Environment variables
 
-CDK Environment variables are generally hardcoded in `lib/constants.ts`. Package variables during deployment are set within the package itself or overwritten via CDK, you can find them inside the specific packages directory. If desired they can be easily overwritten with `mise` as well.
+CDK Environment variables are generally hardcoded in `lib/config/constants.ts`. Package variables during deployment are set within the package itself or overwritten via CDK, you can find them inside the specific packages directory. If desired they can be easily overwritten with `mise` as well.
 
 To do that create a local `mise.local.toml` file. Mise will handle the environment variables for you. This file is excluded from version control and is only for local development - all local env variables or secrets can be set there. See `mise.local.example.toml` for the formatting.
 
@@ -256,7 +258,7 @@ Application artifact versions are stored in **AWS SSM Parameter Store**. Each ar
 - `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` → `{"bucket","key","version","commitSha"}`
 - `/{ssmPrefix}/{repoName}/images/{artifactName}` → `{"repository","imageTag","version","commitSha"}`
 
-The `ssmPrefix` is defined in `lib/constants.ts` and defaults to the CDK repo name (`bergschacht`).
+The `ssmPrefix` is defined in `lib/config/constants.ts` and defaults to the CDK repo name (`bergschacht`).
 
 ### How it works
 
@@ -322,7 +324,7 @@ Each artifact is stored as a single JSON-valued SSM parameter. This ensures atom
 ### Usage in CDK Stacks
 
 ```typescript
-import { getLambdaArtifact, getImageArtifact } from '../lib/version-manifest';
+import { getLambdaArtifact, getImageArtifact } from '../lib/config/version-manifest';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 
@@ -429,7 +431,7 @@ In case CDK pipelines are not deployed or need to be redeployed:
    - Go to AWS Console → CodePipeline → Settings → Connections
    - Create a new connection for GitHub
    - Complete the OAuth flow to authorize AWS access to your repository, make sure to install the app to not use your personal token
-   - Copy the connection ARN to your `GITHUB_CONNECTION_ARN` environment variable or overwrite the value in `lib/constants.ts`
+   - Copy the connection ARN to your `GITHUB_CONNECTION_ARN` environment variable or overwrite the value in `lib/config/constants.ts`
 
 2. **Bootstrap all accounts**:
 
