@@ -28,6 +28,10 @@ description = "Build & run full test suite & synth all stack, pass a stack name 
 depends = ["test", "pre-commit"]
 run = "pnpm run cdk synth"
 
+[tasks.list]
+description = "List all cdk stacks"
+run = 'pnpm run cdk list'
+
 [tasks.synth]
 description = "Build & synthesize stacks (defaults to all with '**', or pass stack names)"
 depends = ["build"]

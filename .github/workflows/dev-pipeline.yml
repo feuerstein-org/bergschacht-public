@@ -1,0 +1,38 @@
+name: Trigger Dev Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'dev-* branch to deploy (e.g. dev-my-feature)'
+        required: true
+        type: string
+
+# Required for OIDC authentication with AWS
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ROLE_NAME: ${{ github.event.repository.name }}-prod-github-actions-role
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-DevPipeline-${{ github.run_id }}
+
+      - name: Trigger Development Pipeline for branch
+        run: |
+          echo "Triggering Development Pipeline for branch: ${{ inputs.branch }}"
+          aws codepipeline start-pipeline-execution \
+            --name ${{ vars.DEV_CDK_PIPELINE_NAME }} \
+            --source-revisions actionName=GitHubSource,revisionType=BRANCH_NAME,revisionValue=${{ inputs.branch }}
+          echo "Development Pipeline triggered successfully"

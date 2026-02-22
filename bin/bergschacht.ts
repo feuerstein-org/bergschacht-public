@@ -8,6 +8,7 @@ import { ProductionPipelineStack } from '../lib/pipeline/production-pipeline-sta
 import {
   cicdAccount,
   devAccount,
+  stagingAccount,
   prodAccount,
   awsRegion,
   pagerDutyEmail,
@@ -35,14 +36,14 @@ const keyAlias = 'alias/cicd-shared';
 const sharedKmsKeyStack = new SharedKmsKeyStack(app, 'SharedKmsKey', {
   kmsDescription: 'Shared KMS key for all pipeline artifacts and deployment resources',
   keyAlias: keyAlias,
-  allowedDecryptAccountIds: [cicdAccount, devAccount, prodAccount],
+  allowedDecryptAccountIds: [cicdAccount, devAccount, stagingAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
   description: 'Shared KMS key for pipeline artifacts and deployment resources',
 });
 
 /**
  * Infrastructure Pipeline Stack
- * Deploys CicdStage with all shared infrastructure (ECR, OIDC, cross-account ReadOnlyRole for Dev and Prod).
+ * Deploys CicdStage with all shared infrastructure (ECR, OIDC, cross-account ReadOnlyRole for Dev, Staging, and Prod).
  * Triggered on infrastructure code changes.
  */
 const infraPipeline = new InfraPipelineStack(app, 'InfraPipeline', {
@@ -52,6 +53,7 @@ const infraPipeline = new InfraPipelineStack(app, 'InfraPipeline', {
   connectionArn: githubConnectionArn,
   cicdAccountId: cicdAccount,
   devAccountId: devAccount,
+  stagingAccountId: stagingAccount,
   prodAccountId: prodAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
@@ -64,7 +66,7 @@ infraPipeline.addDependency(sharedKmsKeyStack);
 
 /**
  * Production Pipeline Stack
- * Dev -> Prod (no CICD stage)
+ * Staging -> Prod (no CICD stage)
  * Deploys application workloads that consume the version manifest from SSM.
  * Triggered by application repos after they update SSM parameters.
  */
@@ -73,7 +75,7 @@ const productionPipeline = new ProductionPipelineStack(app, 'ProductionPipeline'
   githubRepo: githubRepo,
   branch: 'master',
   connectionArn: githubConnectionArn,
-  devAccountId: devAccount,
+  stagingAccountId: stagingAccount,
   prodAccountId: prodAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,

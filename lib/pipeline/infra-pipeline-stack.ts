@@ -35,6 +35,10 @@ export interface InfraPipelineStackProps extends cdk.StackProps {
    */
   readonly devAccountId: string;
   /**
+   * The Staging account ID
+   */
+  readonly stagingAccountId: string;
+  /**
    * The Prod account ID
    */
   readonly prodAccountId: string;
@@ -128,6 +132,7 @@ export class InfraPipelineStack extends cdk.Stack {
     const cicdStage = new CicdStage(this, 'Cicd', {
       cicdAccountId: props.cicdAccountId,
       devAccountId: props.devAccountId,
+      stagingAccountId: props.stagingAccountId,
       prodAccountId: props.prodAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,

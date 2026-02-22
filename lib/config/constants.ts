@@ -6,6 +6,7 @@ export const githubConnectionArn =
   'arn:aws:codeconnections:us-east-1:111111111111:connection/00000000-0000-0000-0000-000000000000';
 export const cicdAccount = process.env.CICD_ACCOUNT_ID || '111111111111';
 export const devAccount = process.env.DEV_ACCOUNT_ID || '222222222222';
+export const stagingAccount = process.env.STAGING_ACCOUNT_ID || '333333333333';
 export const prodAccount = process.env.PROD_ACCOUNT_ID || '444444444444';
 export const awsRegion = process.env.AWS_REGION || 'us-east-1';
 export const pagerDutyEmail =

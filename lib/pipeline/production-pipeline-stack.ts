@@ -26,9 +26,9 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
    */
   readonly connectionArn: string;
   /**
-   * The Dev account ID
+   * The Staging account ID
    */
-  readonly devAccountId: string;
+  readonly stagingAccountId: string;
   /**
    * The Prod account ID
    */
@@ -52,7 +52,7 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
  * CDK Pipeline for production application deployments.
  * This pipeline deploys application workloads (ECS services, Lambda functions, etc.)
  * that consume the version manifest from SSM Parameter Store.
- * It deploys to Dev -> Prod only (no CICD stage needed).
+ * It deploys to Staging -> Prod only (no CICD stage needed).
  *
  * Triggered by application repos after they update SSM, or by code changes.
  * Infrastructure changes (KMS, ECR, OIDC, etc.) are handled by InfraPipelineStack.
@@ -114,13 +114,13 @@ export class ProductionPipelineStack extends cdk.Stack {
       selfMutation: true,
     });
 
-    const devStage = new EnvironmentStage(this, 'Dev', {
-      accountId: props.devAccountId,
+    const stagingStage = new EnvironmentStage(this, 'Staging', {
+      accountId: props.stagingAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
-      env: { account: props.devAccountId, region: props.awsRegion },
+      env: { account: props.stagingAccountId, region: props.awsRegion },
     });
-    this.pipeline.addStage(devStage);
+    this.pipeline.addStage(stagingStage);
 
     const prodStage = new EnvironmentStage(this, 'Prod', {
       accountId: props.prodAccountId,

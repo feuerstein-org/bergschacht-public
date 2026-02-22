@@ -32,7 +32,7 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
 │  │ 2. Trigger only changed pipelines                │   │
 │  │    ┌───────────────────┐ ┌─────────────────────┐ │   │
 │  │    │  Infra Pipeline   │ │ Production Pipeline │ │   │
-│  │    │  (CicdStage)      │ │ (Dev → Prod)        │ │   │
+│  │    │  (CicdStage)      │ │ (Staging → Prod)    │ │   │
 │  │    └───────────────────┘ └─────────────────────┘ │   │
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
@@ -65,7 +65,8 @@ bergschacht/
 └── .github/
     └── workflows/
         ├── test.yml              # PR testing workflow
-        └── deploy.yml            # Synth-based change detection & pipeline triggering
+        ├── deploy.yml            # Synth-based change detection & pipeline triggering
+        └── dev-pipeline.yml      # Manual re-trigger for a specific dev-* branch
 ```
 
 ## Getting started
@@ -355,17 +356,17 @@ Deployments are handled by three CDK Pipelines which all live in the CI/CD accou
 
 ### Pipelines
 
-| Pipeline                                     | AWS Name                         | Trigger                                     | Stages                            | Description                                              |
-| -------------------------------------------- | -------------------------------- | ------------------------------------------- | --------------------------------- | -------------------------------------------------------- |
-| **Infra** (`InfraPipelineStack`)             | `BergschachtInfraPipeline`       | `deploy.yml` on infra changes               | CicdStage                         | Shared infra: KMS, ECR, OIDC, cross-account ReadOnlyRole |
-| **Production** (`ProductionPipelineStack`)   | `BergschachtProductionPipeline`  | `deploy.yml` on app/manifest changes        | Dev → Prod (with manual approval) | Application workloads consuming the version manifest     |
-| **Development** (`DevelopmentPipelineStack`) | `BergschachtDevelopmentPipeline` | CodePipeline V2 trigger on `dev-*` branches | Dev only                          | Feature branch testing                                   |
+| Pipeline                                     | AWS Name                         | Trigger                                     | Stages                                | Description                                              |
+| -------------------------------------------- | -------------------------------- | ------------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
+| **Infra** (`InfraPipelineStack`)             | `BergschachtInfraPipeline`       | `deploy.yml` on infra changes               | CicdStage                             | Shared infra: KMS, ECR, OIDC, cross-account ReadOnlyRole |
+| **Production** (`ProductionPipelineStack`)   | `BergschachtProductionPipeline`  | `deploy.yml` on app/manifest changes        | Staging → Prod (with manual approval) | Application workloads consuming the version manifest     |
+| **Development** (`DevelopmentPipelineStack`) | `BergschachtDevelopmentPipeline` | CodePipeline V2 trigger on `dev-*` branches | Dev only                              | Feature branch testing                                   |
 
 ### Stages
 
 There are two stage classes:
 
-- **`CicdStage`** — All shared infrastructure deployed to the CI/CD account, plus cross-account ReadOnlyRole for Dev and Prod. Used only by the Infra Pipeline.
+- **`CicdStage`** — All shared infrastructure deployed to the CI/CD account, plus cross-account ReadOnlyRole for Dev, Staging, and Prod. Used only by the Infra Pipeline.
 - **`EnvironmentStage`** — Application workloads (ECS services, Lambda functions, etc.) and per-environment SNS PagerDuty topic, parameterized by account ID. Used by both the Production and Development Pipelines.
 
 ### Change Detection (`deploy.yml`)
@@ -391,6 +392,7 @@ These are the required GitHub environment variables (in the `prod` environment) 
 | `AWS_REGION`              | AWS region for deployments         |
 | `INFRA_CDK_PIPELINE_NAME` | Infrastructure CDK Pipeline name   |
 | `PROD_CDK_PIPELINE_NAME`  | Production CDK Pipeline name       |
+| `DEV_CDK_PIPELINE_NAME`   | Development CDK Pipeline name      |
 
 AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` action, assuming a role: `{repo}-prod-github-actions-role`.
 
@@ -399,14 +401,14 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 - **Triggered by**: `deploy.yml` when infrastructure templates change
 - **AWS Pipeline Name**: `BergschachtInfraPipeline`
 - **Deployment stages**:
-  1. **CICD Account** (`CicdStage`) — KMS keys, ECR repository, Lambda artifacts bucket, GitHub OIDC provider, GitHub Actions roles, central logging, cross-account ReadOnlyRole for Dev and Prod
+  1. **CICD Account** (`CicdStage`) — KMS keys, ECR repository, Lambda artifacts bucket, GitHub OIDC provider, GitHub Actions roles, central logging, cross-account ReadOnlyRole for Dev, Staging, and Prod
 
 ### Production Pipeline (`ProductionPipelineStack`)
 
 - **Triggered by**: `deploy.yml` when application templates change, or via `workflow_dispatch` from application repos after an SSM version manifest update
 - **AWS Pipeline Name**: `BergschachtProductionPipeline`
 - **Deployment stages**:
-  1. **Dev Account** (`EnvironmentStage`) — Development environment application workloads
+  1. **Staging Account** (`EnvironmentStage`) — Staging environment application workloads
   2. **Prod Account** (`EnvironmentStage`) — Production environment application workloads (requires manual approval)
 
 ### Development Pipeline (`DevelopmentPipelineStack`)
@@ -418,10 +420,13 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 
 **Important**: Any push to a `dev-*` branch will trigger a deployment to the Dev account.
 
-This deployment model has a few caveats:
+`restartExecutionOnUpdate` is set to `false`. Without this, the self-mutation step would update the pipeline via CloudFormation, and that CloudFormation-triggered restart has no push-event context - it falls back to the hardcoded `master` source branch and overwrites the dev deployment. Self-mutation still runs; the pipeline just won't auto-restart after it applies.
+
+**Manual re-trigger**: The "Release change" button in the CodePipeline console always deploys `master`. After a stage is modified or added (which triggers self-mutation), use the [**Trigger Dev Pipeline**](https://github.com/feuerstein-org/bergschacht/actions/workflows/dev-pipeline.yml) GitHub Actions workflow to re-run the pipeline for your specific branch.
+
+This deployment model has a few additional caveats:
 
 - If two people work on different feature branches their changes will overwrite each other on the Dev account. The only realistic solution is having separate accounts for each team.
-- A deployment from `master` (via the Production Pipeline) will also reset the Dev account. A QA/Beta/Staging account should be added later to fix this problem.
 
 ### Initial Setup
 
@@ -439,9 +444,8 @@ In case CDK pipelines are not deployed or need to be redeployed:
    # Bootstrap the CICD account (where pipelines will run)
    cdk bootstrap aws://<cicd-account-id>/<region>
 
-   # Bootstrap Dev and Prod accounts with trust to CICD account
-   cdk bootstrap aws://<dev-account-id>/<region> --trust <cicd-account-id> --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
-   cdk bootstrap aws://<prod-account-id>/<region> --trust <cicd-account-id> --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
+   # Bootstrap Dev, Staging, and Prod accounts with trust to CICD account
+   cdk bootstrap aws://<account-id>/<region> --trust <cicd-account-id> --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
    ```
 
 3. **Deploy the pipeline stacks manually (first time only)**:
@@ -480,7 +484,7 @@ This stack creates the CDK Pipeline for infrastructure deployments:
 
 - Creates a CodePipeline V2 pipeline (`BergschachtInfraPipeline`) with CodeConnections GitHub connection
 - Deploys `CicdStage` to the CICD account only
-- Contains all shared infra: KMS, ECR, OIDC, logging, and cross-account ReadOnlyRole for Dev/Prod
+- Contains all shared infra: KMS, ECR, OIDC, logging, and cross-account ReadOnlyRole for Dev/Staging/Prod
 - Triggered by GitHub Actions when infrastructure templates change
 
 ### ProductionPipelineStack
@@ -488,7 +492,7 @@ This stack creates the CDK Pipeline for infrastructure deployments:
 This stack creates the CDK Pipeline for application deployments:
 
 - Creates a CodePipeline V2 pipeline (`BergschachtProductionPipeline`) with CodeConnections GitHub connection
-- Deploys `EnvironmentStage` to Dev → Prod accounts in sequence
+- Deploys `EnvironmentStage` to Staging → Prod accounts in sequence
 - Includes manual approval step before Prod deployment
 - Triggered by GitHub Actions when application templates or version manifest SSM parameters change
 
@@ -503,7 +507,7 @@ This stack creates the CDK Pipeline for development/feature branch deployments:
 
 ### ReadOnlyRole
 
-This stack creates a read-only IAM role that can be assumed by the CI/CD account. Deployed as cross-account stacks from `CicdStage` into the Dev and Prod accounts:
+This stack creates a read-only IAM role that can be assumed by the CI/CD account. Deployed as cross-account stacks from `CicdStage` into the Dev, Staging, and Prod accounts:
 
 - Creates an IAM role with AWS managed `ReadOnlyAccess` policy
 - Allows specified ARNs to assume the role for monitoring and inspection

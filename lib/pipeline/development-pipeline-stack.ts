@@ -42,9 +42,16 @@ export interface DevelopmentPipelineStackProps extends cdk.StackProps {
 /**
  * CDK Pipeline for development deployments.
  * This pipeline deploys ONLY to Dev.
- * It is triggered from ALL branches EXCEPT master (feature branches) of the Github repo.
+ * It is triggered from dev-* branches via CodePipeline V2 push triggers.
  *
- * This allows deploying test changes instantly without a 2PR.
+ * This allows deploying feature branch changes instantly without a 2PR.
+ *
+ * `restartExecutionOnUpdate` is intentionally false: the self-mutation step updates the
+ * pipeline via CloudFormation, and CloudFormation-triggered restarts have no push-event
+ * context, so they fall back to the hardcoded 'master' BranchName and would overwrite the
+ * dev deployment. Self-mutation still runs — it just won't auto-restart after applying.
+ * Use the `dev-pipeline.yml` GitHub Actions workflow to manually re-trigger for a specific
+ * branch after a stage is added or modified.
  */
 export class DevelopmentPipelineStack extends cdk.Stack {
   public readonly pipeline: pipelines.CodePipeline;
@@ -75,7 +82,9 @@ export class DevelopmentPipelineStack extends cdk.Stack {
       pipelineType: codepipeline.PipelineType.V2,
       artifactBucket,
       crossAccountKeys: false,
-      restartExecutionOnUpdate: true,
+      // Prevent CloudFormation-triggered restarts (post self-mutation) from falling back to
+      // the hardcoded 'master' BranchName and overwriting the active dev branch deployment.
+      restartExecutionOnUpdate: false,
     });
 
     // Create the source - triggers are disabled here, we configure V2 triggers below

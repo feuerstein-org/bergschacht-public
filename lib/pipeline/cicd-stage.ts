@@ -22,6 +22,10 @@ export interface CicdStageProps extends cdk.StageProps {
    */
   readonly devAccountId: string;
   /**
+   * The Staging account ID
+   */
+  readonly stagingAccountId: string;
+  /**
    * The Prod account ID
    */
   readonly prodAccountId: string;
@@ -55,7 +59,14 @@ export class CicdStage extends cdk.Stage {
     // Add CDK Nag checks to all stacks in this stage
     cdk.Aspects.of(this).add(new AwsSolutionsChecks({ verbose: true }));
 
-    const { cicdAccountId, devAccountId, prodAccountId, awsRegion, pagerDutyEmail } = props;
+    const {
+      cicdAccountId,
+      devAccountId,
+      stagingAccountId,
+      prodAccountId,
+      awsRegion,
+      pagerDutyEmail,
+    } = props;
     const appRepos = props.applicationRepos ?? [];
     const encryptionKeyArn = props.encryptionKeyArn;
 
@@ -72,6 +83,7 @@ export class CicdStage extends cdk.Stage {
       lookupAccountIds: [
         [cicdAccountId, 'CICD'],
         [devAccountId, 'Dev'],
+        [stagingAccountId, 'Staging'],
         [prodAccountId, 'Prod'],
       ],
       githubOidcProvider: githubOidcProviderStack.provider,
@@ -86,6 +98,7 @@ export class CicdStage extends cdk.Stage {
       lookupAccountIds: [
         [cicdAccountId, 'CICD'],
         [devAccountId, 'Dev'],
+        [stagingAccountId, 'Staging'],
         [prodAccountId, 'Prod'],
       ],
       githubOidcProvider: githubOidcProviderStack.provider,
@@ -167,7 +180,7 @@ export class CicdStage extends cdk.Stage {
     // Deploy Lambda Artifacts S3 bucket in CI/CD account with shared KMS key
     const lambdaArtifactsStack = new LambdaArtifactsStack(this, 'LambdaArtifacts', {
       bucketName: 'example-lambda-artifacts',
-      allowedAccountIds: [devAccountId, prodAccountId],
+      allowedAccountIds: [devAccountId, stagingAccountId, prodAccountId],
       encryptionKeyArn,
       serverAccessLogsBucket: centralLoggingBucket.bucket,
       env: { account: cicdAccountId, region: awsRegion },
@@ -177,7 +190,7 @@ export class CicdStage extends cdk.Stage {
     const ecrStack = new EcrStack(this, 'FeuersteinEcr', {
       repositoryName: 'feuerstein',
       notificationTopic: snsPagerDutyStack.topic,
-      allowedPullAccountIds: [devAccountId, prodAccountId],
+      allowedPullAccountIds: [devAccountId, stagingAccountId, prodAccountId],
       encryptionKeyArn,
       env: { account: cicdAccountId, region: awsRegion },
     });
@@ -204,6 +217,12 @@ export class CicdStage extends cdk.Stage {
     new ReadOnlyRoleStack(this, 'DevReadOnlyRole', {
       trustedArns: [cicdAccountId],
       env: { account: devAccountId, region: awsRegion },
+    });
+
+    // ReadOnly Role for Staging account
+    new ReadOnlyRoleStack(this, 'StagingReadOnlyRole', {
+      trustedArns: [cicdAccountId],
+      env: { account: stagingAccountId, region: awsRegion },
     });
 
     // ReadOnly Role for Prod account
