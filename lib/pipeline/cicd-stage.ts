@@ -87,6 +87,18 @@ export class CicdStage extends cdk.Stage {
         [prodAccountId, 'Prod'],
       ],
       githubOidcProvider: githubOidcProviderStack.provider,
+      additionalPolicies: [
+        // Permission to read version manifest from SSM during CDK synth
+        new iam.PolicyStatement({
+          sid: 'AllowSsmReadVersionManifest',
+          effect: iam.Effect.ALLOW,
+          actions: ['ssm:GetParameter', 'ssm:GetParametersByPath'],
+          resources: [
+            `arn:aws:ssm:${awsRegion}:${cicdAccountId}:parameter/${ssmPrefix}/*`,
+            `arn:aws:ssm:${awsRegion}:${cicdAccountId}:parameter/${ssmPrefix}`,
+          ],
+        }),
+      ],
       env: { account: cicdAccountId, region: awsRegion },
     });
 

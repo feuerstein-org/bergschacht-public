@@ -41,6 +41,8 @@ jobs:
   synth-detect:
     if: inputs.pipeline == '' || inputs.pipeline == 'auto'
     runs-on: ubuntu-latest
+    environment:
+      name: dev
     outputs:
       infra_changed: ${{ steps.diff.outputs.infra_changed }}
       prod_changed: ${{ steps.diff.outputs.prod_changed }}
@@ -53,9 +55,17 @@ jobs:
       - name: Install dependencies
         run: mise run install-ci
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-SynthDetect-${{ github.run_id }}
+
       - name: Build & Synth
         run: |
           mise run build-ci
+          aws ssm get-parameters-by-path --path /bergschacht --recursive --query "Parameters[*].{Name:Name,Value:Value}" --output json > version-manifest.json
           pnpm run cdk synth --quiet 2>/dev/null || true
 
       - name: Compute template checksums

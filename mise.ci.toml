@@ -20,7 +20,7 @@ run = "pnpm run build"
 
 [tasks.diff-ci]
 description = "See diff for all stacks, pass a stack name to filter"
-run = "pnpm run cdk diff"
+run = "pnpm run cdk diff '**'"
 
 [tasks.test-ci]
 description = "Run test-suite"

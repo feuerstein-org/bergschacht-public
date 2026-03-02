@@ -16,20 +16,30 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
             │                               │
             ▼                               ▼
 ┌─────────────────────────────────────────────────────────┐
-│               AWS SSM Parameter Store                   │
+│               AWS SSM Parameter Store (CICD account)    │
 │      /{ssmPrefix}/{repo}/images/{name}  → {JSON}        │
 │      /{ssmPrefix}/{repo}/lambdas/{name} → {JSON}        │
 └──────────────────────────┬──────────────────────────────┘
-                           │ Read at CDK synth time
-                           │ (valueFromLookup)
+                           │ Dumped to version-manifest.json
+                           │ before cdk synth
                            ▼
 ┌─────────────────────────────────────────────────────────┐
 │                  Bergschacht (CDK Repo)                 │
 │                                                         │
+│  version-manifest.json  (local cache, not committed)    │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ [{Name: /bergschacht/repo/lambdas/name,          │   │
+│  │   Value: {"bucket","key","objectVersion",...}},  │   │
+│  │  ...]                                            │   │
+│  └──────────────────────────────────────────────────┘   │
+│                           │ Read by getLambdaArtifact()  │
+│                           │     / getImageArtifact()     │
+│                           ▼                              │
 │  deploy.yml                                             │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ 1. Synth CDK & compare template checksums        │   │
-│  │ 2. Trigger only changed pipelines                │   │
+│  │ 1. Dump SSM → version-manifest.json              │   │
+│  │ 2. Synth CDK & compare template checksums        │   │
+│  │ 3. Trigger only changed pipelines                │   │
 │  │    ┌───────────────────┐ ┌─────────────────────┐ │   │
 │  │    │  Infra Pipeline   │ │ Production Pipeline │ │   │
 │  │    │  (CicdStage)      │ │ (Staging → Prod)    │ │   │
@@ -91,13 +101,14 @@ To do that create a local `mise.local.toml` file. Mise will handle the environme
 You can use `pnpm` to format, lint, build and test. Alternatively you can also use `mise` tasks which under will use `pnpm` under the hood.
 
 ```bash
-mise run pre-commit    # Run pre-commit (formatting/linting)
-mise run build         # Build CDK
-mise run test          # Build & run tests
-mise run test-full     # Build, test, pre-commit & synth
-mise run synth         # Build & synthesize stacks
-mise run diff          # Show diff for stacks
-mise run deploy        # Deploy to AWS
+mise run pre-commit         # Run pre-commit (formatting/linting)
+mise run build              # Build CDK
+mise run test               # Build & run tests
+mise run test-full          # Build, test, pre-commit & synth
+mise run refresh-manifest   # Dump SSM → version-manifest.json (requires CICD account credentials)
+mise run synth              # Build & synthesize stacks
+mise run diff               # Show diff for stacks
+mise run deploy             # Deploy to AWS
 
 # Or use pnpm directly
 pnpm run build
@@ -111,6 +122,9 @@ To see all available `mise` tasks run `mise run`.
 
 > Note:
 > `cdk diff` and `cdk deploy` require permissions to the account. You need at least ReadOnly permissions for `diff` and deployment permissions for `deploy`.
+>
+> `mise run synth` and any other command that reads artifact versions requires `version-manifest.json` to exist.
+> Run `mise run refresh-manifest` once (with CICD account credentials) before synthsing locally.
 
 ### Adding a New Application Repository
 
@@ -254,19 +268,27 @@ For non-workspace repos (single `pyproject.toml` at root), everything works the 
 
 ### Version Management
 
-Application artifact versions are stored in **AWS SSM Parameter Store**. Each artifact is a single JSON-valued parameter for atomic reads and writes:
+Application artifact versions are stored in **AWS SSM Parameter Store** in the CICD account. Each artifact is a single JSON-valued parameter for atomic reads and writes:
 
-- `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` → `{"bucket","key","version","commitSha"}`
+- `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` → `{"bucket","key","objectVersion","version","commitSha"}`
 - `/{ssmPrefix}/{repoName}/images/{artifactName}` → `{"repository","imageTag","version","commitSha"}`
 
 The `ssmPrefix` is defined in `lib/config/constants.ts` and defaults to the CDK repo name (`bergschacht`).
+
+To avoid fetching SSM parameters in the CICD account from Dev/Staging/Prod accounts or replicating the SSM params to all accounts - **a local cache file is written before `cdk synth` runs**:
+
+This file (`version-manifest.json`) is git-ignored and generated:
+
+- **In CI/CD pipelines** — automatically by the synth step (which runs in the CICD account)
+- **Locally** — by running `mise run refresh-manifest` (requires CICD account credentials)
 
 ### How it works
 
 1. **Application repos** build and push Docker images / Lambda packages to AWS
 2. They write artifact metadata to SSM Parameter Store (one JSON parameter per artifact), but only if the version is newer than the existing one
 3. They dispatch the CDK repo's `deploy.yml` workflow with `pipeline: prod` via a GitHub App token
-4. The CDK repo's `deploy.yml` triggers the **Production Pipeline**, which reads the latest artifact versions from SSM at synth time via `valueFromLookup`
+4. The CDK repo's `deploy.yml` dumps all SSM parameters to `version-manifest.json`, then runs `cdk synth`, and triggers the **Production Pipeline**
+5. The Production Pipeline's own synth step (running in the CICD account) also dumps SSM before calling `cdk synth`, so the deployed templates always use the latest artifact versions
 
 For infrastructure changes pushed to `master`, `deploy.yml` runs `cdk synth`, compares template checksums against cached values, and only triggers the **Infra Pipeline** and/or **Production Pipeline** if their templates actually changed.
 
@@ -288,6 +310,7 @@ Each artifact is stored as a single JSON-valued SSM parameter. This ensures atom
 {
   "bucket": "example-lambda-artifacts",
   "key": "sample-python-repo/sample-python-repo-0.1.0.zip",
+  "objectVersion": "AbCdEf1234567890",
   "version": "0.1.0",
   "commitSha": "abc123..."
 }
@@ -306,12 +329,13 @@ Each artifact is stored as a single JSON-valued SSM parameter. This ensures atom
 
 **Lambda Deployment**
 
-| Field       | Description                                             |
-| ----------- | ------------------------------------------------------- |
-| `bucket`    | S3 bucket containing the artifact                       |
-| `key`       | S3 object key (path to zip file)                        |
-| `version`   | Semantic version of the package                         |
-| `commitSha` | Git commit SHA that produced this artifact (7-40 chars) |
+| Field           | Description                                             |
+| --------------- | ------------------------------------------------------- |
+| `bucket`        | S3 bucket containing the artifact                       |
+| `key`           | S3 object key (path to zip file)                        |
+| `objectVersion` | S3 object version ID                                    |
+| `version`       | Semantic version of the package                         |
+| `commitSha`     | Git commit SHA that produced this artifact (7-40 chars) |
 
 **Container Image Deployment**
 
@@ -329,25 +353,27 @@ import { getLambdaArtifact, getImageArtifact } from '../lib/config/version-manif
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 
-// Get Lambda package configuration. Pass scope (this), repo name, and artifact name.
-const lambdaConfig = getLambdaArtifact(this, 'order-processor', 'order-processor');
+// Get Lambda package configuration. Pass repo name and artifact name.
+// Reads from version-manifest.json
+const lambdaConfig = getLambdaArtifact('order-processor', 'order-processor');
 
 new lambda.Function(this, 'OrderProcessor', {
   code: lambda.Code.fromBucket(
     s3.Bucket.fromBucketName(this, 'Bucket', lambdaConfig.bucket),
-    lambdaConfig.key
+    lambdaConfig.key,
+    lambdaConfig.objectVersion
   ),
   // ... other configuration
 });
 
 // Get image artifact
-const imageConfig = getImageArtifact(this, 'order-processor', 'order-processor');
+const imageConfig = getImageArtifact('order-processor', 'order-processor');
 // Use imageConfig.repository and imageConfig.imageTag
 
 // Multi-artifact repo: get specific named artifacts
-const workerImage = getImageArtifact(this, 'order-service', 'worker');
-const apiImage = getImageArtifact(this, 'order-service', 'api');
-const webhookLambda = getLambdaArtifact(this, 'order-service', 'webhook');
+const workerImage = getImageArtifact('order-service', 'worker');
+const apiImage = getImageArtifact('order-service', 'api');
+const webhookLambda = getLambdaArtifact('order-service', 'webhook');
 ```
 
 ## Deployment Model
@@ -411,6 +437,8 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
   1. **Staging Account** (`EnvironmentStage`) — Staging environment application workloads
   2. **Prod Account** (`EnvironmentStage`) — Production environment application workloads (requires manual approval)
 
+The pipeline's synth step dumps all SSM parameters under `/bergschacht` to `version-manifest.json` before running `cdk synth`, ensuring the deployed templates always reflect the latest artifact versions.
+
 ### Development Pipeline (`DevelopmentPipelineStack`)
 
 - **Triggered by**: CodePipeline V2 push trigger on all branches matching `dev-*`
@@ -422,7 +450,7 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 
 `restartExecutionOnUpdate` is set to `false`. Without this, the self-mutation step would update the pipeline via CloudFormation, and that CloudFormation-triggered restart has no push-event context - it falls back to the hardcoded `master` source branch and overwrites the dev deployment. Self-mutation still runs; the pipeline just won't auto-restart after it applies.
 
-**Manual re-trigger**: The "Release change" button in the CodePipeline console always deploys `master`. After a stage is modified or added (which triggers self-mutation), use the [**Trigger Dev Pipeline**](https://github.com/feuerstein-org/bergschacht/actions/workflows/dev-pipeline.yml) GitHub Actions workflow to re-run the pipeline for your specific branch.
+**Manual re-trigger**: The "Release change" button in the CodePipeline console always deploys `master`. After a stage is modified or added (which triggers self-mutation), use the [**Trigger Dev Pipeline**](https://github.com/feuerstein-org/bergschacht/actions/workflows/dev-pipeline.yml) GitHub Actions workflow to re-run the pipeline for your specific branch (The workflow needs to run from the `master` branch to have permissions to trigger the pipeline).
 
 This deployment model has a few additional caveats:
 

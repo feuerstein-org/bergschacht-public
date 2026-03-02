@@ -54,6 +54,9 @@ jobs:
       - name: Build
         run: mise run build-ci
 
+      - name: Fetch version manifest from SSM
+        run: aws ssm get-parameters-by-path --path /bergschacht --recursive --query "Parameters[*].{Name:Name,Value:Value}" --output json > version-manifest.json
+
       - name: Test
         run: mise run test-ci
 
