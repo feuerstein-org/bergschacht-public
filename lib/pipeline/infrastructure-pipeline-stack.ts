@@ -10,7 +10,7 @@ import { CicdStage } from './cicd-stage';
 import { ApplicationRepo } from '../config/constants';
 import { ssmPrefix } from '../config/constants';
 
-export interface InfraPipelineStackProps extends cdk.StackProps {
+export interface InfrastructurePipelineStackProps extends cdk.StackProps {
   /**
    * GitHub repository owner (organization or user)
    */
@@ -72,10 +72,10 @@ export interface InfraPipelineStackProps extends cdk.StackProps {
  *
  * Application workloads (including per-environment SNS) are deployed by the ProductionPipelineStack.
  */
-export class InfraPipelineStack extends cdk.Stack {
+export class InfrastructurePipelineStack extends cdk.Stack {
   public readonly pipeline: pipelines.CodePipeline;
 
-  constructor(scope: Construct, id: string, props: InfraPipelineStackProps) {
+  constructor(scope: Construct, id: string, props: InfrastructurePipelineStackProps) {
     super(scope, id, props);
 
     const branch = props.branch ?? 'master';
@@ -99,8 +99,8 @@ export class InfraPipelineStack extends cdk.Stack {
     });
 
     // Create the CodePipeline V2 pipeline with shared KMS key
-    const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineInfra', {
-      pipelineName: 'BergschachtInfraPipeline',
+    const underlyingPipeline = new codepipeline.Pipeline(this, 'UnderlyingPipelineInfrastructure', {
+      pipelineName: 'BergschachtInfrastructurePipeline',
       pipelineType: codepipeline.PipelineType.V2,
       artifactBucket,
       crossAccountKeys: false,
@@ -108,7 +108,7 @@ export class InfraPipelineStack extends cdk.Stack {
     });
 
     // Create the CDK Pipeline with CodeStar connection source
-    this.pipeline = new pipelines.CodePipeline(this, 'InfraPipeline', {
+    this.pipeline = new pipelines.CodePipeline(this, 'InfrastructurePipeline', {
       codePipeline: underlyingPipeline,
       synth: new pipelines.CodeBuildStep('Synth', {
         input: pipelines.CodePipelineSource.connection(

@@ -2,7 +2,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { SharedKmsKeyStack } from '../lib/infrastructure/shared-kms-key-stack';
-import { InfraPipelineStack } from '../lib/pipeline/infra-pipeline-stack';
+import { InfrastructurePipelineStack } from '../lib/pipeline/infrastructure-pipeline-stack';
 import { DevelopmentPipelineStack } from '../lib/pipeline/development-pipeline-stack';
 import { ProductionPipelineStack } from '../lib/pipeline/production-pipeline-stack';
 import {
@@ -46,7 +46,7 @@ const sharedKmsKeyStack = new SharedKmsKeyStack(app, 'SharedKmsKey', {
  * Deploys CicdStage with all shared infrastructure (ECR, OIDC, cross-account ReadOnlyRole for Dev, Staging, and Prod).
  * Triggered on infrastructure code changes.
  */
-const infraPipeline = new InfraPipelineStack(app, 'InfraPipeline', {
+const infrastructurePipeline = new InfrastructurePipelineStack(app, 'InfrastructurePipeline', {
   githubOwner: githubOrg,
   githubRepo: githubRepo,
   branch: 'master',
@@ -62,7 +62,7 @@ const infraPipeline = new InfraPipelineStack(app, 'InfraPipeline', {
   env: { account: cicdAccount, region: awsRegion },
   description: 'CDK Pipeline for infrastructure deployments',
 });
-infraPipeline.addDependency(sharedKmsKeyStack);
+infrastructurePipeline.addDependency(sharedKmsKeyStack);
 
 /**
  * Production Pipeline Stack

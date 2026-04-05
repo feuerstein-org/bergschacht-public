@@ -121,7 +121,7 @@ export class CicdStage extends cdk.Stage {
           effect: iam.Effect.ALLOW,
           actions: ['codepipeline:StartPipelineExecution'],
           resources: [
-            `arn:aws:codepipeline:${awsRegion}:${cicdAccountId}:BergschachtInfraPipeline`,
+            `arn:aws:codepipeline:${awsRegion}:${cicdAccountId}:BergschachtInfrastructurePipeline`,
             `arn:aws:codepipeline:${awsRegion}:${cicdAccountId}:BergschachtProductionPipeline`,
           ],
         }),
@@ -222,7 +222,7 @@ export class CicdStage extends cdk.Stage {
     }
 
     // --- Cross-account infrastructure for Dev and Prod ---
-    // These stacks deploy into the Dev/Prod accounts but are owned by the infra pipeline
+    // These stacks deploy into the Dev/Prod accounts but are owned by the infrastructure pipeline
     // so the application pipeline doesn't need to redeploy them.
 
     // ReadOnly Role for Dev account

@@ -73,7 +73,7 @@ jobs:
         run: |
           # Hash all CloudFormation templates grouped by pipeline.
           # Includes both the pipeline stack templates AND the nested stage
-          # assembly templates (e.g. assembly-InfraPipeline-CicdStage/*.template.json)
+          # assembly templates (e.g. assembly-InfrastructurePipeline-CicdStage/*.template.json)
           # so that changes to application stacks are detected too.
           cd cdk.out
 
@@ -83,7 +83,7 @@ jobs:
               -print0 | sort -z | xargs -0 sha256sum 2>/dev/null
           }
 
-          echo "infra=$(pipeline_hash InfraPipeline | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "infra=$(pipeline_hash InfrastructurePipeline | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "prod=$(pipeline_hash ProductionPipeline | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore previous checksums
@@ -189,7 +189,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: GitHubActions-InfraPipeline-${{ github.run_id }}
+          role-session-name: GitHubActions-InfrastructurePipeline-${{ github.run_id }}
 
       - name: Trigger Infrastructure Pipeline
         run: |
@@ -209,7 +209,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ vars.CICD_ACCOUNT_ID }}:role/${{ env.ROLE_NAME }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: GitHubActions-ProdPipeline-${{ github.run_id }}
+          role-session-name: GitHubActions-ProductionPipeline-${{ github.run_id }}
 
       - name: Trigger Production Pipeline
         run: |

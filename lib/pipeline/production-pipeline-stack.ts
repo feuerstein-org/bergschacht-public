@@ -57,7 +57,7 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
  * It deploys to Staging -> Prod only (no CICD stage needed).
  *
  * Triggered by application repos after they update SSM, or by code changes.
- * Infrastructure changes (KMS, ECR, OIDC, etc.) are handled by InfraPipelineStack.
+ * Infrastructure changes (KMS, ECR, OIDC, etc.) are handled by InfrastructurePipelineStack.
  */
 export class ProductionPipelineStack extends cdk.Stack {
   public readonly pipeline: pipelines.CodePipeline;
