@@ -42,4 +42,6 @@ export const applicationRepos: ApplicationRepo[] = [
   { org: 'feuerstein-org', repo: 'sample-python-repo', environment: 'prod' },
   { org: 'feuerstein-org', repo: 'sample-python-monorepo', environment: 'prod' },
   { org: 'feuerstein-org', repo: 'bergschacht-custom-resources', environment: 'prod' },
+  { org: 'feuerstein-org', repo: 'foerderturm', environment: 'prod' },
+  { org: 'feuerstein-org', repo: 'foerderturm-workers', environment: 'prod' },
 ];
