@@ -30,7 +30,7 @@ export interface ProductionPipelineStackProps extends cdk.StackProps {
   /**
    * The Staging account ID
    */
-  readonly stagingAccountId: string;
+  readonly stageAccountId: string;
   /**
    * The Prod account ID
    */
@@ -126,13 +126,13 @@ export class ProductionPipelineStack extends cdk.Stack {
       selfMutation: true,
     });
 
-    const stagingStage = new EnvironmentStage(this, 'Staging', {
-      accountId: props.stagingAccountId,
+    const stageStage = new EnvironmentStage(this, 'Stage', {
+      accountId: props.stageAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
-      env: { account: props.stagingAccountId, region: props.awsRegion },
+      env: { account: props.stageAccountId, region: props.awsRegion },
     });
-    this.pipeline.addStage(stagingStage);
+    this.pipeline.addStage(stageStage);
 
     const prodStage = new EnvironmentStage(this, 'Prod', {
       accountId: props.prodAccountId,

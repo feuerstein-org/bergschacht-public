@@ -24,7 +24,7 @@ export interface CicdStageProps extends cdk.StageProps {
   /**
    * The Staging account ID
    */
-  readonly stagingAccountId: string;
+  readonly stageAccountId: string;
   /**
    * The Prod account ID
    */
@@ -62,7 +62,7 @@ export class CicdStage extends cdk.Stage {
     const {
       cicdAccountId,
       devAccountId,
-      stagingAccountId,
+      stageAccountId,
       prodAccountId,
       awsRegion,
       pagerDutyEmail,
@@ -83,7 +83,7 @@ export class CicdStage extends cdk.Stage {
       lookupAccountIds: [
         [cicdAccountId, 'CICD'],
         [devAccountId, 'Dev'],
-        [stagingAccountId, 'Staging'],
+        [stageAccountId, 'Stage'],
         [prodAccountId, 'Prod'],
       ],
       githubOidcProvider: githubOidcProviderStack.provider,
@@ -110,7 +110,7 @@ export class CicdStage extends cdk.Stage {
       lookupAccountIds: [
         [cicdAccountId, 'CICD'],
         [devAccountId, 'Dev'],
-        [stagingAccountId, 'Staging'],
+        [stageAccountId, 'Stage'],
         [prodAccountId, 'Prod'],
       ],
       githubOidcProvider: githubOidcProviderStack.provider,
@@ -192,7 +192,7 @@ export class CicdStage extends cdk.Stage {
     // Deploy Lambda Artifacts S3 bucket in CI/CD account with shared KMS key
     const lambdaArtifactsStack = new LambdaArtifactsStack(this, 'LambdaArtifacts', {
       bucketName: 'example-lambda-artifacts',
-      allowedAccountIds: [devAccountId, stagingAccountId, prodAccountId],
+      allowedAccountIds: [devAccountId, stageAccountId, prodAccountId],
       encryptionKeyArn,
       serverAccessLogsBucket: centralLoggingBucket.bucket,
       env: { account: cicdAccountId, region: awsRegion },
@@ -202,7 +202,7 @@ export class CicdStage extends cdk.Stage {
     const ecrStack = new EcrStack(this, 'FeuersteinEcr', {
       repositoryName: 'feuerstein',
       notificationTopic: snsPagerDutyStack.topic,
-      allowedPullAccountIds: [devAccountId, stagingAccountId, prodAccountId],
+      allowedPullAccountIds: [devAccountId, stageAccountId, prodAccountId],
       encryptionKeyArn,
       env: { account: cicdAccountId, region: awsRegion },
     });
@@ -231,10 +231,10 @@ export class CicdStage extends cdk.Stage {
       env: { account: devAccountId, region: awsRegion },
     });
 
-    // ReadOnly Role for Staging account
-    new ReadOnlyRoleStack(this, 'StagingReadOnlyRole', {
+    // ReadOnly Role for Stage account
+    new ReadOnlyRoleStack(this, 'StageReadOnlyRole', {
       trustedArns: [cicdAccountId],
-      env: { account: stagingAccountId, region: awsRegion },
+      env: { account: stageAccountId, region: awsRegion },
     });
 
     // ReadOnly Role for Prod account

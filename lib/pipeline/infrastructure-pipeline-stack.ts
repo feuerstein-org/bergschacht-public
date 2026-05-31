@@ -39,7 +39,7 @@ export interface InfrastructurePipelineStackProps extends cdk.StackProps {
   /**
    * The Staging account ID
    */
-  readonly stagingAccountId: string;
+  readonly stageAccountId: string;
   /**
    * The Prod account ID
    */
@@ -144,7 +144,7 @@ export class InfrastructurePipelineStack extends cdk.Stack {
     const cicdStage = new CicdStage(this, 'Cicd', {
       cicdAccountId: props.cicdAccountId,
       devAccountId: props.devAccountId,
-      stagingAccountId: props.stagingAccountId,
+      stageAccountId: props.stageAccountId,
       prodAccountId: props.prodAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,

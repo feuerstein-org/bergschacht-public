@@ -8,7 +8,7 @@ import { ProductionPipelineStack } from '../lib/pipeline/production-pipeline-sta
 import {
   cicdAccount,
   devAccount,
-  stagingAccount,
+  stageAccount,
   prodAccount,
   awsRegion,
   pagerDutyEmail,
@@ -36,7 +36,7 @@ const keyAlias = 'alias/cicd-shared';
 const sharedKmsKeyStack = new SharedKmsKeyStack(app, 'SharedKmsKey', {
   kmsDescription: 'Shared KMS key for all pipeline artifacts and deployment resources',
   keyAlias: keyAlias,
-  allowedDecryptAccountIds: [cicdAccount, devAccount, stagingAccount, prodAccount],
+  allowedDecryptAccountIds: [cicdAccount, devAccount, stageAccount, prodAccount],
   env: { account: cicdAccount, region: awsRegion },
   description: 'Shared KMS key for pipeline artifacts and deployment resources',
 });
@@ -53,7 +53,7 @@ const infrastructurePipeline = new InfrastructurePipelineStack(app, 'Infrastruct
   connectionArn: githubConnectionArn,
   cicdAccountId: cicdAccount,
   devAccountId: devAccount,
-  stagingAccountId: stagingAccount,
+  stageAccountId: stageAccount,
   prodAccountId: prodAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
@@ -75,7 +75,7 @@ const productionPipeline = new ProductionPipelineStack(app, 'ProductionPipeline'
   githubRepo: githubRepo,
   branch: 'master',
   connectionArn: githubConnectionArn,
-  stagingAccountId: stagingAccount,
+  stageAccountId: stageAccount,
   prodAccountId: prodAccount,
   awsRegion: awsRegion,
   pagerDutyEmail: pagerDutyEmail,
