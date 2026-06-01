@@ -88,6 +88,23 @@ export class EcrStack extends cdk.Stack {
           ],
         })
       );
+
+      // Give Lambda permissions to pull the image
+      this.repository.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: 'AllowCrossAccountLambdaPull',
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.ServicePrincipal('lambda.amazonaws.com')],
+          actions: ['ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage'],
+          conditions: {
+            StringLike: {
+              'aws:sourceArn': props.allowedPullAccountIds.map(
+                (accountId) => `arn:aws:lambda:${this.region}:${accountId}:function:*`
+              ),
+            },
+          },
+        })
+      );
     }
 
     new cdk.CfnOutput(this, 'RepositoryUri', {

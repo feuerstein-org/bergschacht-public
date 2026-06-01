@@ -141,6 +141,40 @@ describe('EcrStack', () => {
         },
       });
     });
+
+    test('grants the Lambda service principal cross-account pull scoped by source function ARN', () => {
+      templateWithCrossAccount.hasResourceProperties('AWS::ECR::Repository', {
+        RepositoryPolicyText: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'AllowCrossAccountLambdaPull',
+              Effect: 'Allow',
+              Action: ['ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage'],
+              Principal: {
+                Service: 'lambda.amazonaws.com',
+              },
+              Condition: {
+                StringLike: {
+                  // region renders as a Ref token, so each sourceArn is an Fn::Join
+                  'aws:sourceArn': Match.arrayWith([
+                    Match.objectLike({
+                      'Fn::Join': Match.arrayWith([
+                        Match.arrayWith([Match.stringLikeRegexp('.*11111111111:function:\\*')]),
+                      ]),
+                    }),
+                    Match.objectLike({
+                      'Fn::Join': Match.arrayWith([
+                        Match.arrayWith([Match.stringLikeRegexp('.*222222222222:function:\\*')]),
+                      ]),
+                    }),
+                  ]),
+                },
+              },
+            }),
+          ]),
+        },
+      });
+    });
   });
 
   describe('with notification topic', () => {

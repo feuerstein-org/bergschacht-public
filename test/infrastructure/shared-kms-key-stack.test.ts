@@ -59,6 +59,31 @@ describe('SharedKmsKeyStack', () => {
     });
   });
 
+  test('grants the cross-account Lambda service principal decrypt scoped by source function ARN', () => {
+    template.hasResourceProperties('AWS::KMS::Key', {
+      KeyPolicy: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'AllowDecryptFromCrossAccountLambda',
+            Effect: 'Allow',
+            Principal: {
+              Service: 'lambda.amazonaws.com',
+            },
+            Action: ['kms:Decrypt', 'kms:DescribeKey'],
+            Condition: {
+              StringLike: {
+                'aws:sourceArn': Match.arrayWith([
+                  Match.stringLikeRegexp('arn:aws:lambda:.*:123456789012:function:\\*'),
+                  Match.stringLikeRegexp('arn:aws:lambda:.*:210987654321:function:\\*'),
+                ]),
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
   test('creates KMS key alias when provided', () => {
     template.hasResourceProperties('AWS::KMS::Alias', {
       AliasName: 'alias/test-kms-key',

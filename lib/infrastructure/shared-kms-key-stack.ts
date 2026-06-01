@@ -60,6 +60,24 @@ export class SharedKmsKeyStack extends cdk.Stack {
           resources: ['*'],
         })
       );
+
+      // Give Lambda permissions to pull the image
+      this.key.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: 'AllowDecryptFromCrossAccountLambda',
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.ServicePrincipal('lambda.amazonaws.com')],
+          actions: ['kms:Decrypt', 'kms:DescribeKey'],
+          resources: ['*'],
+          conditions: {
+            StringLike: {
+              'aws:sourceArn': props.allowedDecryptAccountIds.map(
+                (accountId) => `arn:aws:lambda:*:${accountId}:function:*`
+              ),
+            },
+          },
+        })
+      );
     }
 
     // Export key ID and ARN as CloudFormation outputs
