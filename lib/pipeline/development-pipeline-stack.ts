@@ -51,7 +51,7 @@ export interface DevelopmentPipelineStackProps extends cdk.StackProps {
  * `restartExecutionOnUpdate` is intentionally false: the self-mutation step updates the
  * pipeline via CloudFormation, and CloudFormation-triggered restarts have no push-event
  * context, so they fall back to the hardcoded 'master' BranchName and would overwrite the
- * dev deployment. Self-mutation still runs — it just won't auto-restart after applying.
+ * dev deployment. Self-mutation still runs - it just won't auto-restart after applying.
  * Use the `dev-pipeline.yml` GitHub Actions workflow to manually re-trigger for a specific
  * branch after a stage is added or modified.
  */
@@ -129,6 +129,7 @@ export class DevelopmentPipelineStack extends cdk.Stack {
 
     // Deploy to Dev account only
     const devStage = new EnvironmentStage(this, 'Dev', {
+      environment: 'dev',
       accountId: props.devAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,

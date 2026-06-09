@@ -17,8 +17,8 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
             ▼                               ▼
 ┌─────────────────────────────────────────────────────────┐
 │               AWS SSM Parameter Store (CICD account)    │
-│      /{ssmPrefix}/{repo}/images/{name}  → {JSON}        │
-│      /{ssmPrefix}/{repo}/lambdas/{name} → {JSON}        │
+│      /{ssmPrefix}/{repo}/images/{name} -> {JSON}        │
+│      /{ssmPrefix}/{repo}/lambdas/{name} -> {JSON}       │
 └──────────────────────────┬──────────────────────────────┘
                            │ Dumped to version-manifest.json
                            │ before cdk synth
@@ -37,19 +37,19 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
 │                           ▼                             │
 │  deploy.yml                                             │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ 1. Dump SSM → version-manifest.json              │   │
+│  │ 1. Dump SSM -> version-manifest.json             │   │
 │  │ 2. Synth CDK & compare template checksums        │   │
 │  │ 3. Trigger only changed pipelines                │   │
 │  │   ┌───────────────────┐  ┌─────────────────────┐ │   │
 │  │   │  Infrastructure   │  │   Production        │ │   │
 │  │   │  Pipeline         │  │   Pipeline          │ │   │
-│  │   │  (CicdStage)      │  │  (Staging → Prod)   │ │   │
+│  │   │  (CicdStage)      │  │  (Staging -> Prod)  │ │   │
 │  │   └───────────────────┘  └─────────────────────┘ │   │
 │  └──────────────────────────────────────────────────┘   │
 │                                                         │
 │  Development Pipeline (CodePipeline V2 auto-trigger)    │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ Triggered by dev-* branches → Dev account only   │   │
+│  │ Triggered by dev-* branches -> Dev account only  │   │
 │  └──────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -106,7 +106,7 @@ mise run pre-commit         # Run pre-commit (formatting/linting)
 mise run build              # Build CDK
 mise run test               # Build & run tests
 mise run test-full          # Build, test, pre-commit & synth
-mise run refresh-manifest   # Dump SSM → version-manifest.json (requires CICD account credentials)
+mise run refresh-manifest   # Dump SSM -> version-manifest.json (requires CICD account credentials)
 mise run synth              # Build & synthesize stacks
 mise run diff               # Show diff for stacks
 mise run deploy             # Deploy to AWS
@@ -148,8 +148,8 @@ To see all available `mise` tasks run `mise run`.
 | `CDK_REPO_OWNER`        | GitHub owner of the CDK repo       |
 | `CDK_REPO_NAME`         | Name of the CDK repo               |
 
-4. Give your new repository permissions to push to S3/ECR by updating the IAM permissions in this repo. This is done by updating the `constants.ts` file.
-5. Deploy your application using CDK. See below for usage in CDK stacks.
+1. Give your new repository permissions to push to S3/ECR by updating the IAM permissions in this repo. This is done by updating the `constants.ts` file.
+2. Deploy your application using CDK. See below for usage in CDK stacks.
 
 #### Artifact Configuration
 
@@ -271,8 +271,8 @@ For non-workspace repos (single `pyproject.toml` at root), everything works the 
 
 Application artifact versions are stored in **AWS SSM Parameter Store** in the CICD account. Each artifact is a single JSON-valued parameter for atomic reads and writes:
 
-- `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` → `{"bucket","key","objectVersion","version","commitSha"}`
-- `/{ssmPrefix}/{repoName}/images/{artifactName}` → `{"repository","imageTag","version","commitSha"}`
+- `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` -> `{"bucket","key","objectVersion","version","commitSha"}`
+- `/{ssmPrefix}/{repoName}/images/{artifactName}` -> `{"repository","imageTag","version","commitSha"}`
 
 The `ssmPrefix` is defined in `lib/config/constants.ts` and defaults to the CDK repo name (`bergschacht`).
 
@@ -280,8 +280,8 @@ To avoid fetching SSM parameters in the CICD account from Dev/Staging/Prod accou
 
 This file (`version-manifest.json`) is git-ignored and generated:
 
-- **In CI/CD pipelines** — automatically by the synth step (which runs in the CICD account)
-- **Locally** — by running `mise run refresh-manifest` (requires CICD account credentials)
+- **In CI/CD pipelines** - automatically by the synth step (which runs in the CICD account)
+- **Locally** - by running `mise run refresh-manifest` (requires CICD account credentials)
 
 ### How it works
 
@@ -393,21 +393,21 @@ Deployments are handled by three CDK Pipelines which all live in the CI/CD accou
 
 There are two stage classes:
 
-- **`CicdStage`** — All shared infrastructure deployed to the CI/CD account, plus cross-account ReadOnlyRole for Dev, Staging, and Prod. Used only by the Infrastructure Pipeline.
-- **`EnvironmentStage`** — Application workloads (ECS services, Lambda functions, etc.) and per-environment SNS PagerDuty topic, parameterized by account ID. Used by both the Production and Development Pipelines.
+- **`CicdStage`** - All shared infrastructure deployed to the CI/CD account, plus cross-account ReadOnlyRole for Dev, Staging, and Prod. Used only by the Infrastructure Pipeline.
+- **`EnvironmentStage`** - Application workloads (ECS services, Lambda functions, etc.) and per-environment SNS PagerDuty topic, parameterized by account ID. Used by both the Production and Development Pipelines.
 
 ### Change Detection (`deploy.yml`)
 
 When triggered automatically (push to `master`), the deploy workflow uses **synth-based change detection** rather than path-based heuristics:
 
-1. **Synth** — Runs `cdk synth` to produce all CloudFormation templates
-2. **Checksum** — Hashes templates grouped by pipeline prefix (`InfrastructurePipeline*` vs `ProductionPipeline*`)
-3. **Compare** — Compares against cached checksums from the previous run (GitHub Actions cache)
-4. **Trigger** — Only triggers pipelines whose templates actually changed
+1. **Synth** - Runs `cdk synth` to produce all CloudFormation templates
+2. **Checksum** - Hashes templates grouped by pipeline prefix (`InfrastructurePipeline*` vs `ProductionPipeline*`)
+3. **Compare** - Compares against cached checksums from the previous run (GitHub Actions cache)
+4. **Trigger** - Only triggers pipelines whose templates actually changed
 
 This avoids unnecessary deployments when e.g. a shared file like `constants.ts` is edited but doesn't affect a particular pipeline's output.
 
-For explicit triggers (`workflow_dispatch`, `workflow_call`), the synth step is skipped entirely — the pipeline is triggered directly:
+For explicit triggers (`workflow_dispatch`, `workflow_call`), the synth step is skipped entirely - the pipeline is triggered directly:
 
 ### Environment Variables & Secrets
 
@@ -428,15 +428,15 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 - **Triggered by**: `deploy.yml` when infrastructure templates change
 - **AWS Pipeline Name**: `BergschachtInfrastructurePipeline`
 - **Deployment stages**:
-  1. **CICD Account** (`CicdStage`) — KMS keys, ECR repository, Lambda artifacts bucket, GitHub OIDC provider, GitHub Actions roles, central logging, cross-account ReadOnlyRole for Dev, Staging, and Prod
+  1. **CICD Account** (`CicdStage`) - KMS keys, ECR repository, Lambda artifacts bucket, GitHub OIDC provider, GitHub Actions roles, central logging, cross-account ReadOnlyRole for Dev, Staging, and Prod
 
 ### Production Pipeline (`ProductionPipelineStack`)
 
 - **Triggered by**: `deploy.yml` when application templates change, or via `workflow_dispatch` from application repos after an SSM version manifest update
 - **AWS Pipeline Name**: `BergschachtProductionPipeline`
 - **Deployment stages**:
-  1. **Staging Account** (`EnvironmentStage`) — Staging environment application workloads
-  2. **Prod Account** (`EnvironmentStage`) — Production environment application workloads (requires manual approval)
+  1. **Staging Account** (`EnvironmentStage`) - Staging environment application workloads
+  2. **Prod Account** (`EnvironmentStage`) - Production environment application workloads (requires manual approval)
 
 The pipeline's synth step dumps all SSM parameters under `/bergschacht` to `version-manifest.json` before running `cdk synth`, ensuring the deployed templates always reflect the latest artifact versions.
 
@@ -445,7 +445,7 @@ The pipeline's synth step dumps all SSM parameters under `/bergschacht` to `vers
 - **Triggered by**: CodePipeline V2 push trigger on all branches matching `dev-*`
 - **AWS Pipeline Name**: `BergschachtDevelopmentPipeline`
 - **Deployment stages**:
-  1. **Dev Account** (`EnvironmentStage`) — Development environment only
+  1. **Dev Account** (`EnvironmentStage`) - Development environment only
 
 **Important**: Any push to a `dev-*` branch will trigger a deployment to the Dev account.
 
@@ -462,7 +462,7 @@ This deployment model has a few additional caveats:
 In case CDK pipelines are not deployed or need to be redeployed:
 
 1. **Create a CodeStar Connection to GitHub**:
-   - Go to AWS Console → CodePipeline → Settings → Connections
+   - Go to AWS Console -> CodePipeline -> Settings -> Connections
    - Create a new connection for GitHub
    - Complete the OAuth flow to authorize AWS access to your repository, make sure to install the app to not use your personal token
    - Copy the connection ARN to your `GITHUB_CONNECTION_ARN` environment variable or overwrite the value in `lib/config/constants.ts`
@@ -478,6 +478,7 @@ In case CDK pipelines are not deployed or need to be redeployed:
    ```
 
 3. **Deploy the pipeline stacks manually (first time only)**:
+
    ```bash
    cdk deploy InfrastructurePipeline ProductionPipeline DevelopmentPipeline
    ```
@@ -521,7 +522,7 @@ This stack creates the CDK Pipeline for infrastructure deployments:
 This stack creates the CDK Pipeline for application deployments:
 
 - Creates a CodePipeline V2 pipeline (`BergschachtProductionPipeline`) with CodeConnections GitHub connection
-- Deploys `EnvironmentStage` to Staging → Prod accounts in sequence
+- Deploys `EnvironmentStage` to Staging -> Prod accounts in sequence
 - Includes manual approval step before Prod deployment
 - Triggered by GitHub Actions when application templates or version manifest SSM parameters change
 
@@ -581,3 +582,13 @@ This stack creates an ECR repository for storing container images:
 - Sets up lifecycle rules to keep only the last 10 images
 - Optionally grants cross-account pull permissions to specified AWS accounts
 - Optionally sends SNS notifications when image scans detect CRITICAL or HIGH severity vulnerabilities via EventBridge rules
+
+### FoerderturmStack
+
+Application workload stack deployed by `EnvironmentStage` into Dev, Staging, and Prod. Hosts the [foerderturm](https://github.com/feuerstein-org/foerderturm) Dagster control plane (webserver + daemon) on Fargate, with Litestream replicating SQLite to S3 for durability and a Tailscale sidecar exposing the UI over the tailnet. See the [foerderturm repo](https://github.com/feuerstein-org/foerderturm) for the container images, local-dev compose stack, and a deeper explanation of why SQLite + Litestream over Postgres/EFS.
+
+- Creates a minimal per-env VPC (public subnets only, no NAT) and an ECS Fargate cluster running one task with six containers (litestream-restore, dagster-init, dagster-webserver, dagster-daemon, litestream sidecar, tailscale sidecar) sharing a task-scoped `dagster-home` volume
+- Versioned, KMS-encrypted S3 bucket for Litestream WAL replication with `RETAIN` removal policy and 30-day noncurrent-version expiration
+- Pulls the three container images (`dagster`, `litestream`, `tailscale`) from the version manifest, all published by the foerderturm repo to the shared ECR repo
+- Reads the Tailscale OAuth client secret from SSM at `/tailscale/foerderturm/oauth-client` - this is a `SecureString` and must be created out-of-band (CloudFormation cannot create SecureString parameters)
+- Service uses `minHealthyPercent=0` / `maxHealthyPercent=100` (stop-then-start) because SQLite is single-writer; `desiredCount` is configured per-environment in `environment-stage.ts` (1 in prod, 0 in dev/staging to reduce cost)

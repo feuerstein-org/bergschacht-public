@@ -21,6 +21,19 @@ export const githubRepo = process.env.GITHUB_REPO || 'bergschacht';
 export const ssmPrefix = githubRepo;
 
 /**
+ * Naming convention for foerderturm connector Lambdas. Connectors live in their own
+ * (data-plane) stack, but the orchestrator invokes them by name via Dagster Pipes
+ * (`dg.EnvVar("CONNECTOR_<VENDOR>_LAMBDA_NAME")`). Keeping the name deterministic lets the
+ * orchestrator grant `lambda:InvokeFunction` on a prefix pattern and receive the name as a
+ * plain-string env var, so connectors can be added/removed without a hard cross-stack reference.
+ */
+export const connectorFunctionPrefix = 'foerderturm-connector-';
+
+/** Deterministic function name for a connector, e.g. `connectorFunctionName('example', 'dev')` */
+export const connectorFunctionName = (vendor: string, environment: string): string =>
+  `${connectorFunctionPrefix}${vendor}-${environment}`;
+
+/**
  * Application repository configuration.
  * Each entry defines a GitHub repo that is allowed to push artifacts (Docker images / Lambda packages)
  * to the central CI/CD account.
@@ -43,5 +56,4 @@ export const applicationRepos: ApplicationRepo[] = [
   { org: 'feuerstein-org', repo: 'sample-python-monorepo', environment: 'prod' },
   { org: 'feuerstein-org', repo: 'bergschacht-custom-resources', environment: 'prod' },
   { org: 'feuerstein-org', repo: 'foerderturm', environment: 'prod' },
-  { org: 'feuerstein-org', repo: 'foerderturm-workers', environment: 'prod' },
 ];

@@ -127,6 +127,7 @@ export class ProductionPipelineStack extends cdk.Stack {
     });
 
     const stageStage = new EnvironmentStage(this, 'Stage', {
+      environment: 'stage',
       accountId: props.stageAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,
@@ -135,6 +136,7 @@ export class ProductionPipelineStack extends cdk.Stack {
     this.pipeline.addStage(stageStage);
 
     const prodStage = new EnvironmentStage(this, 'Prod', {
+      environment: 'prod',
       accountId: props.prodAccountId,
       awsRegion: props.awsRegion,
       pagerDutyEmail: props.pagerDutyEmail,

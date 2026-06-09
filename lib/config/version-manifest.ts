@@ -6,8 +6,8 @@
  * {@link VERSION_MANIFEST_PATH}.
  *
  * SSM layout (source of truth, written by app repos):
- *   /{ssmPrefix}/{repoName}/lambdas/{artifactName}  → LambdaArtifact JSON
- *   /{ssmPrefix}/{repoName}/images/{artifactName}   → ContainerArtifact JSON
+ *   /{ssmPrefix}/{repoName}/lambdas/{artifactName} -> LambdaArtifact JSON
+ *   /{ssmPrefix}/{repoName}/images/{artifactName} -> ContainerArtifact JSON
  *
  * Local cache layout (version-manifest.json):
  *   { "/{ssmPrefix}/repo/lambdas/name": { ... }, ... }
@@ -15,6 +15,10 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { Construct } from 'constructs';
 import { ssmPrefix } from './constants';
 
 // ---------------------------------------------------------------------------
@@ -60,7 +64,7 @@ export const SSM_PREFIX = `/${ssmPrefix}`;
  */
 export const VERSION_MANIFEST_PATH = path.resolve(__dirname, '..', '..', 'version-manifest.json');
 
-/** Parsed manifest cache — loaded lazily on first access. */
+/** Parsed manifest cache - loaded lazily on first access. */
 let manifestCache: Record<string, string> | undefined;
 
 /**
@@ -91,7 +95,7 @@ export function _resetManifestCache(): void {
 }
 
 /**
- * Inject manifest data directly (for tests — avoids filesystem mocking).
+ * Inject manifest data directly (for tests - avoids filesystem mocking).
  * Accepts the same format as the JSON file (array of `{Name, Value}` entries).
  */
 export function _loadManifestFromData(entries: { Name: string; Value: string }[]): void {
@@ -134,13 +138,66 @@ export function getLambdaArtifact(repoName: string, artifactName: string): Lambd
  * Get a named container image artifact from the local manifest cache.
  *
  * @example
- * const image = getImageArtifact('sample-python-repo', 'sample-etl-pipeline');
- * new ecs.ContainerImage.fromEcrRepository(
- *   ecr.Repository.fromRepositoryUri(this, 'Repo', image.repository),
- *   image.imageTag,
- * );
+ * const artifact = getImageArtifact('sample-python-repo', 'sample-etl-pipeline');
+ * const image = getContainerImage(this, 'SampleImage', artifact);
  */
 export function getImageArtifact(repoName: string, artifactName: string): ContainerArtifact {
   const json = lookup(`${SSM_PREFIX}/${repoName}/images/${artifactName}`);
   return JSON.parse(json) as ContainerArtifact;
+}
+
+/**
+ * Parse a ContainerArtifact's ECR repository URI into its component pieces.
+ *
+ * @throws Error if `artifact.repository` is not a recognizable ECR URI.
+ */
+function parseEcrRepository(
+  scope: Construct,
+  id: string,
+  artifact: ContainerArtifact
+): ecr.IRepository {
+  const [host, ...pathParts] = artifact.repository.split('/');
+  if (!host) {
+    throw new Error(`Invalid repository with empty host: ${artifact.repository}`);
+  }
+  const name = pathParts.join('/');
+  const hostMatch = /^(\d{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/.exec(host);
+  if (!hostMatch || !name) {
+    throw new Error(`Unrecognized ECR repository URI: ${artifact.repository}`);
+  }
+  const region = hostMatch[2];
+  const account = hostMatch[1];
+  const repository = ecr.Repository.fromRepositoryAttributes(scope, id, {
+    repositoryArn: `arn:aws:ecr:${region}:${account}:repository/${name}`,
+    repositoryName: name,
+  });
+  return repository;
+}
+
+/**
+ * Build an `ecs.ContainerImage` for a ContainerArtifact
+ *
+ * @throws Error if `artifact.repository` is not a recognizable ECR URI.
+ */
+export function getContainerImage(
+  scope: Construct,
+  id: string,
+  artifact: ContainerArtifact
+): ecs.ContainerImage {
+  const repository = parseEcrRepository(scope, id, artifact);
+  return ecs.ContainerImage.fromEcrRepository(repository, artifact.imageTag);
+}
+
+/**
+ * Build `lambda.DockerImageCode` for a ContainerArtifact
+ *
+ * @throws Error if `artifact.repository` is not a recognizable ECR URI.
+ */
+export function getLambdaDockerImageCode(
+  scope: Construct,
+  id: string,
+  artifact: ContainerArtifact
+): lambda.DockerImageCode {
+  const repository = parseEcrRepository(scope, id, artifact);
+  return lambda.DockerImageCode.fromEcr(repository, { tagOrDigest: artifact.imageTag });
 }
