@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template, Match } from 'aws-cdk-lib/assertions';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import { SharedKmsKeyStack } from '../../lib/infrastructure/shared-kms-key-stack';
 
 describe('SharedKmsKeyStack', () => {
@@ -149,6 +150,55 @@ describe('SharedKmsKeyStack', () => {
               }),
             ])
           ),
+        },
+      });
+    });
+  });
+
+  describe('with additional resource policy', () => {
+    let policyTemplate: Template;
+
+    beforeEach(() => {
+      const app = new cdk.App();
+      const stack = new SharedKmsKeyStack(app, 'TestKmsWithPolicy', {
+        kmsDescription: 'Test key with additional policy',
+        keyAlias: 'test-policy-key',
+        additionalResourcePolicy: [
+          new iam.PolicyStatement({
+            sid: 'AllowS3TablesMaintenanceAccess',
+            effect: iam.Effect.ALLOW,
+            principals: [new iam.ServicePrincipal('maintenance.s3tables.amazonaws.com')],
+            actions: ['kms:GenerateDataKey', 'kms:Decrypt'],
+            resources: ['*'],
+            conditions: {
+              StringEquals: {
+                'aws:SourceAccount': '123456789012',
+              },
+            },
+          }),
+        ],
+      });
+      policyTemplate = Template.fromStack(stack);
+    });
+
+    test('adds the maintenance principal statement to the key policy', () => {
+      policyTemplate.hasResourceProperties('AWS::KMS::Key', {
+        KeyPolicy: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'AllowS3TablesMaintenanceAccess',
+              Effect: 'Allow',
+              Principal: {
+                Service: 'maintenance.s3tables.amazonaws.com',
+              },
+              Action: ['kms:GenerateDataKey', 'kms:Decrypt'],
+              Condition: {
+                StringEquals: {
+                  'aws:SourceAccount': '123456789012',
+                },
+              },
+            }),
+          ]),
         },
       });
     });

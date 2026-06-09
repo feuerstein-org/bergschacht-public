@@ -19,6 +19,12 @@ export interface SharedKmsKeyStackProps extends cdk.StackProps {
    * @default - No alias is created
    */
   readonly keyAlias?: string;
+  /**
+   * Additional IAM policy statements to add to the key's resource policy.
+   * Use this to grant service principals (e.g. S3 Tables/CloudFront ) access.
+   * @default - No additional statements
+   */
+  readonly additionalResourcePolicy?: iam.PolicyStatement[];
 }
 
 /**
@@ -45,6 +51,13 @@ export class SharedKmsKeyStack extends cdk.Stack {
         aliasName: `alias/${props.keyAlias}`,
         targetKey: this.key,
       });
+    }
+
+    // Add any additional resource policy statements
+    if (props.additionalResourcePolicy) {
+      for (const statement of props.additionalResourcePolicy) {
+        this.key.addToResourcePolicy(statement);
+      }
     }
 
     // Grant decrypt permission to specified accounts
