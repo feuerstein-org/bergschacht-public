@@ -4,6 +4,7 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3files from 'aws-cdk-lib/aws-s3files';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
@@ -22,6 +23,11 @@ const TAILSCALE_SERVE_CONFIG_PATH = '/etc/tailscale/serve.json';
 /** Volume name for the task-scoped SQLite directory shared by the Dagster + Litestream containers. */
 const DAGSTER_HOME_VOLUME = 'dagster-home';
 const DAGSTER_HOME_PATH = '/app/dagster_home';
+
+/** Preserve Tailscale state in S3 Files */
+const TAILSCALE_STATE_VOLUME = 'tailscale-state';
+const TAILSCALE_STATE_PATH = '/var/lib/tailscale';
+const NFS_PORT = 2049;
 
 export interface FoerderturmStackProps extends cdk.StackProps {
   /**
@@ -185,20 +191,121 @@ export class FoerderturmStack extends cdk.Stack {
       ],
     });
 
+    // ---- Tailscale state file system (Amazon S3 Files) ----
+    const tailscaleStateBucket = new s3.Bucket(this, 'TailscaleStateBucket', {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      versioned: true, //required by S3 Files
+      enforceSSL: true,
+      lifecycleRules: [
+        {
+          id: 'ExpireOldTailscaleStateVersions',
+          noncurrentVersionExpiration: cdk.Duration.days(30),
+          enabled: true,
+        },
+        {
+          id: 'AbortIncompleteMultipartUpload',
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
+          enabled: true,
+        },
+      ],
+    });
+
+    // Role S3 Files assumes to sync the file system to its bucket
+    // See reference here: https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-files-prereq-policies.html#s3-files-prereq-iam-compute-role
+    // No L2 construct yet, see here:
+    // https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_s3files-readme.html
+    const tailscaleStateFsRole = new iam.Role(this, 'TailscaleStateFsRole', {
+      assumedBy: new iam.ServicePrincipal('elasticfilesystem.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: {
+            'aws:SourceArn': `arn:${this.partition}:s3files:${this.region}:${this.account}:file-system/*`,
+          },
+        },
+      }),
+      description: `Role Amazon S3 Files assumes to sync the foerderturm-${environment} Tailscale statedir file system to S3`,
+    });
+    tailscaleStateFsRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'S3BucketPermissions',
+        actions: ['s3:ListBucket', 's3:ListBucketVersions'],
+        resources: [tailscaleStateBucket.bucketArn],
+        conditions: { StringEquals: { 'aws:ResourceAccount': this.account } },
+      })
+    );
+    tailscaleStateFsRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'S3ObjectPermissions',
+        actions: [
+          's3:AbortMultipartUpload',
+          's3:DeleteObject*',
+          's3:GetObject*',
+          's3:List*',
+          's3:PutObject*',
+        ],
+        resources: [tailscaleStateBucket.arnForObjects('*')],
+        conditions: { StringEquals: { 'aws:ResourceAccount': this.account } },
+      })
+    );
+    // Skipped KMS policy
+    tailscaleStateFsRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'EventBridgeManage',
+        actions: [
+          'events:DeleteRule',
+          'events:DisableRule',
+          'events:EnableRule',
+          'events:PutRule',
+          'events:PutTargets',
+          'events:RemoveTargets',
+        ],
+        resources: [`arn:${this.partition}:events:*:*:rule/DO-NOT-DELETE-S3-Files*`],
+        conditions: { StringEquals: { 'events:ManagedBy': 'elasticfilesystem.amazonaws.com' } },
+      })
+    );
+    tailscaleStateFsRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'EventBridgeRead',
+        actions: [
+          'events:DescribeRule',
+          'events:ListRuleNamesByTarget',
+          'events:ListRules',
+          'events:ListTargetsByRule',
+        ],
+        resources: [`arn:${this.partition}:events:*:*:rule/*`],
+      })
+    );
+
+    const tailscaleStateFs = new s3files.CfnFileSystem(this, 'TailscaleStateFileSystem', {
+      bucket: tailscaleStateBucket.bucketArn,
+      roleArn: tailscaleStateFsRole.roleArn,
+      // The bucket is dedicated to S3 Files; acknowledge S3 Files taking it over.
+      acceptBucketWarning: true,
+      // Name tag so this deployment's file system is identifiable in the console (fs-… otherwise).
+      tags: [{ key: 'Name', value: `foerderturm-${environment}-tailscale-state` }],
+    });
+
+    const tailscaleStateFsSg = new ec2.SecurityGroup(this, 'TailscaleStateFsSg', {
+      vpc: this.vpc,
+      allowAllOutbound: false,
+      description: `foerderturm-${environment}: S3 Files mount targets for the Tailscale statedir`,
+    });
+    // One mount target per AZ the task can land in (service runs across all public subnets).
+    this.vpc.publicSubnets.forEach((subnet, i) => {
+      new s3files.CfnMountTarget(this, `TailscaleStateMountTarget${i}`, {
+        fileSystemId: tailscaleStateFs.attrFileSystemId,
+        subnetId: subnet.subnetId,
+        securityGroups: [tailscaleStateFsSg.securityGroupId],
+      });
+    });
+
     // ---- Tailscale OAuth client secret (SSM SecureString, created out-of-band) ----
     this.tailscaleSecret = ssm.StringParameter.fromSecureStringParameterAttributes(
       this,
       'TailscaleOAuthSecret',
       { parameterName: `/foerderturm-${environment}/tailscale/oauth-client` }
     );
-
-    // Tailscale creates and manages this SSM parameter itself on first boot.
-    const tailscaleStateParamName = `/foerderturm-${environment}/tailscale/state`;
-    const tailscaleStateParamArn = cdk.Stack.of(this).formatArn({
-      service: 'ssm',
-      resource: 'parameter',
-      resourceName: tailscaleStateParamName.replace(/^\//, ''),
-    });
 
     // ---- CloudWatch log group ----
     this.logGroup = new logs.LogGroup(this, 'LogGroup', {
@@ -353,7 +460,7 @@ export class FoerderturmStack extends cdk.Stack {
     });
 
     // (6) Tailscale sidecar: registers as a tagged node and serves HTTPS via MagicDNS.
-    taskDef.addContainer('tailscale', {
+    const tailscale = taskDef.addContainer('tailscale', {
       containerName: 'tailscale',
       image: getContainerImage(this, 'TailscaleRepo', props.tailscaleImageArtifact),
       essential: true,
@@ -362,10 +469,7 @@ export class FoerderturmStack extends cdk.Stack {
         TS_USERSPACE: 'true',
         TS_EXTRA_ARGS: `--advertise-tags=${tailscaleTag} --ssh=false`,
         TS_SERVE_CONFIG: TAILSCALE_SERVE_CONFIG_PATH,
-        // Pass SSM parameter in to store state
-        TS_TAILSCALED_EXTRA_ARGS: `--state=${tailscaleStateParamArn}`,
-        // With persistent state, this means "reuse the saved login from SSM on restart"
-        // instead of re-authing each boot (which would churn LE cert issuance).
+        TS_STATE_DIR: TAILSCALE_STATE_PATH,
         TS_AUTH_ONCE: 'true',
       },
       secrets: {
@@ -376,10 +480,30 @@ export class FoerderturmStack extends cdk.Stack {
         logGroup: this.logGroup,
       }),
     });
+    tailscale.addMountPoints({
+      sourceVolume: TAILSCALE_STATE_VOLUME,
+      containerPath: TAILSCALE_STATE_PATH,
+      readOnly: false,
+    });
+
+    // Register the S3 Files volume. CDK has no L2 for s3filesVolumeConfiguration yet, so we declare
+    // the volume name through the L2 (keeps mount-point validation happy + fixes its array index)
+    // and inject the S3 Files config via an escape hatch. dagster-home is Volumes[0]; this is [1].
+    taskDef.addVolume({ name: TAILSCALE_STATE_VOLUME });
+    const cfnTaskDef = taskDef.node.defaultChild as ecs.CfnTaskDefinition;
+    cfnTaskDef.addPropertyOverride('Volumes.1.S3FilesVolumeConfiguration', {
+      FileSystemArn: tailscaleStateFs.attrFileSystemArn,
+      RootDirectory: '/',
+    });
 
     // ---- Task role permissions ----
     this.litestreamBucket.grantReadWrite(taskDef.taskRole);
     this.pipesMessagesBucket.grantRead(taskDef.taskRole);
+
+    // Give permissions to access S3 Files.
+    taskDef.taskRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FilesClientFullAccess')
+    );
 
     taskDef.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
@@ -395,32 +519,13 @@ export class FoerderturmStack extends cdk.Stack {
       })
     );
 
-    // ---- Task role: Tailscale state parameter (read + create-on-first-boot) ----
-    taskDef.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-        resources: [tailscaleStateParamArn],
-      })
-    );
-    taskDef.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ['kms:Decrypt', 'kms:GenerateDataKey'],
-        resources: ['*'],
-        conditions: {
-          StringEquals: {
-            'kms:ViaService': `ssm.${cdk.Stack.of(this).region}.amazonaws.com`,
-          },
-        },
-      })
-    );
-
     // TODO: potentially add metrics/canaries to make sure this service is up?
 
     // ---- ECS service ----
     // assignPublicIp=true since we run in public subnets with no NAT (egress via IGW).
     // minimumHealthyPercent=0 + maximumPercent=100 = stop-then-start, required by SQLite's
     // single-writer constraint (no two tasks can hold the DB open simultaneously).
-    this.service = new ecs.FargateService(this, 'Service', {
+    const service = new ecs.FargateService(this, 'Service', {
       serviceName: `foerderturm-${environment}`,
       cluster: this.cluster,
       taskDefinition: taskDef,
@@ -432,6 +537,14 @@ export class FoerderturmStack extends cdk.Stack {
       enableExecuteCommand: true,
       circuitBreaker: { rollback: false },
     });
+    this.service = service;
+
+    // Let the Fargate task reach the S3 Files mount targets over NFS.
+    tailscaleStateFsSg.connections.allowFrom(
+      service,
+      ec2.Port.tcp(NFS_PORT),
+      `NFS from the foerderturm-${environment} Fargate task to the Tailscale state file system`
+    );
 
     // ---- Outputs ----
     new cdk.CfnOutput(this, 'ServiceName', {
@@ -455,19 +568,24 @@ export class FoerderturmStack extends cdk.Stack {
       description:
         'SSM SecureString parameter that must hold the Tailscale OAuth client secret (tskey-client-...). Create out-of-band.',
     });
-    new cdk.CfnOutput(this, 'TailscaleStateParamName', {
-      value: tailscaleStateParamName,
-      description: 'SSM parameter where tailscaled persists its state (machine key, certs).',
+    new cdk.CfnOutput(this, 'TailscaleStateFileSystemId', {
+      value: tailscaleStateFs.attrFileSystemId,
+      description:
+        'S3 Files file system backing the Tailscale statedir (node identity + MagicDNS cert).',
     });
     new cdk.CfnOutput(this, 'TailscaleHostname', {
       value: props.tailscaleHostname,
       description: 'MagicDNS hostname; full URL is https://<this>.<tailnet>.ts.net/',
     });
 
-    this.addNagSuppressions(taskDef);
+    this.addNagSuppressions(taskDef, tailscaleStateBucket, tailscaleStateFsRole);
   }
 
-  private addNagSuppressions(taskDef: ecs.FargateTaskDefinition): void {
+  private addNagSuppressions(
+    taskDef: ecs.FargateTaskDefinition,
+    tailscaleStateBucket: s3.Bucket,
+    tailscaleStateFsRole: iam.Role
+  ): void {
     NagSuppressions.addResourceSuppressions(this.vpc, [
       {
         id: 'AwsSolutions-VPC7',
@@ -490,6 +608,13 @@ export class FoerderturmStack extends cdk.Stack {
       },
     ]);
 
+    NagSuppressions.addResourceSuppressions(tailscaleStateBucket, [
+      {
+        id: 'AwsSolutions-S1',
+        reason: 'Backs the Tailscale S3 Files statedir, access logging not warranted.',
+      },
+    ]);
+
     NagSuppressions.addResourceSuppressions(this.cluster, [
       {
         id: 'AwsSolutions-ECS4',
@@ -503,9 +628,15 @@ export class FoerderturmStack extends cdk.Stack {
         {
           id: 'AwsSolutions-IAM5',
           reason:
-            'ecr:GetAuthorizationToken requires resource:*; KMS for Tailscale on alias/aws/ssm; ' +
+            'ecr:GetAuthorizationToken requires resource:*; ' +
             'lambda:InvokeFunction scoped to the foerderturm-connector-* name prefix so connectors ' +
             'can be added/removed without re-deploying this stack; S3 read on the Pipes bucket objects path.',
+        },
+        {
+          id: 'AwsSolutions-IAM4',
+          reason:
+            'AmazonS3FilesClientFullAccess is the AWS-managed client policy for S3 Files ' +
+            '(mount/read/write incl. ClientRootAccess); used by the task to mount the Tailscale statedir.',
         },
         {
           id: 'AwsSolutions-ECS2',
@@ -523,6 +654,20 @@ export class FoerderturmStack extends cdk.Stack {
           id: 'AwsSolutions-EC23',
           reason:
             'Tasks run in public subnets so the Tailscale sidecar can reach the tailnet control plane.',
+        },
+      ],
+      true
+    );
+
+    NagSuppressions.addResourceSuppressions(
+      tailscaleStateFsRole,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'S3 Files service role per AWS prerequisite policy: EventBridge needs rule/* (read) and ' +
+            'rule/DO-NOT-DELETE-S3-Files* (gated by events:ManagedBy); S3 object actions are scoped ' +
+            'to the dedicated state bucket.',
         },
       ],
       true

@@ -59,7 +59,8 @@ describe('FoerderturmStack', () => {
   });
 
   test('creates a Litestream S3 bucket with KMS encryption and versioning', () => {
-    template.resourceCountIs('AWS::S3::Bucket', 2);
+    // litestream + pipes-messages + tailscale-state file system bucket
+    template.resourceCountIs('AWS::S3::Bucket', 3);
     template.hasResourceProperties('AWS::S3::Bucket', {
       VersioningConfiguration: { Status: 'Enabled' },
       BucketEncryption: {
@@ -233,7 +234,7 @@ describe('FoerderturmStack', () => {
             { Name: 'TS_USERSPACE', Value: 'true' },
             Match.objectLike({ Name: 'TS_EXTRA_ARGS' }),
             { Name: 'TS_SERVE_CONFIG', Value: '/etc/tailscale/serve.json' },
-            Match.objectLike({ Name: 'TS_TAILSCALED_EXTRA_ARGS' }),
+            { Name: 'TS_STATE_DIR', Value: '/var/lib/tailscale' },
             { Name: 'TS_AUTH_ONCE', Value: 'true' },
           ]),
           Secrets: Match.arrayWith([Match.objectLike({ Name: 'TS_AUTHKEY' })]),
@@ -349,47 +350,159 @@ describe('FoerderturmStack', () => {
     });
   });
 
-  test('grants the task role SSM + KMS access for the Tailscale state parameter', () => {
-    // tailscaled needs SSM/KMS permissions to manage its state in the SSM
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Effect: 'Allow',
-            Action: ['ssm:GetParameter', 'ssm:PutParameter'],
-            Resource: {
-              'Fn::Join': Match.arrayWith([
-                Match.arrayWith([
-                  Match.stringLikeRegexp('parameter/foerderturm-test/tailscale/state'),
-                ]),
-              ]),
-            },
-          }),
-          Match.objectLike({
-            Effect: 'Allow',
-            Action: ['kms:Decrypt', 'kms:GenerateDataKey'],
-            Resource: '*',
-            Condition: {
-              StringEquals: {
-                'kms:ViaService': {
-                  'Fn::Join': Match.arrayWith([Match.arrayWith(['ssm.', '.amazonaws.com'])]),
-                },
-              },
-            },
-          }),
-        ]),
-      },
-    });
-  });
-
   test('creates CloudFormation outputs', () => {
     template.hasOutput('ServiceName', {});
     template.hasOutput('ClusterName', {});
     template.hasOutput('LitestreamBucketName', {});
     template.hasOutput('PipesMessagesBucketName', {});
     template.hasOutput('TailscaleSecretName', {});
-    template.hasOutput('TailscaleStateParamName', {});
+    template.hasOutput('TailscaleStateFileSystemId', {});
     template.hasOutput('TailscaleHostname', {});
+  });
+
+  describe('Tailscale statedir persistence (S3 Files)', () => {
+    test('creates a versioned, S3-managed-encrypted file system bucket', () => {
+      template.hasResource('AWS::S3::Bucket', {
+        DeletionPolicy: 'Retain',
+        Properties: Match.objectLike({
+          VersioningConfiguration: { Status: 'Enabled' },
+          BucketEncryption: {
+            ServerSideEncryptionConfiguration: [
+              Match.objectLike({ ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }),
+            ],
+          },
+        }),
+      });
+    });
+
+    test('creates an S3 Files file system bound to the bucket and a service role', () => {
+      template.resourceCountIs('AWS::S3Files::FileSystem', 1);
+      template.hasResourceProperties('AWS::S3Files::FileSystem', {
+        AcceptBucketWarning: true,
+        // The CFN schema requires the bucket ARN (not the name) — must render as GetAtt …Arn.
+        Bucket: { 'Fn::GetAtt': [Match.stringLikeRegexp('TailscaleStateBucket'), 'Arn'] },
+        RoleArn: { 'Fn::GetAtt': [Match.stringLikeRegexp('TailscaleStateFsRole'), 'Arn'] },
+      });
+    });
+
+    test('the file system service role trusts the S3 Files (EFS) service principal', () => {
+      template.hasResourceProperties('AWS::IAM::Role', {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Effect: 'Allow',
+              Action: 'sts:AssumeRole',
+              Principal: { Service: 'elasticfilesystem.amazonaws.com' },
+            }),
+          ]),
+        },
+      });
+    });
+
+    test('grants the file system service role bucket-sync + EventBridge permissions', () => {
+      // S3 Files (as the service) must list the bucket, read/write its objects, and manage the
+      // EventBridge rules it uses to detect bucket changes.
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'S3BucketPermissions',
+              Effect: 'Allow',
+              Action: ['s3:ListBucket', 's3:ListBucketVersions'],
+              Condition: { StringEquals: { 'aws:ResourceAccount': Match.anyValue() } },
+            }),
+            Match.objectLike({
+              Sid: 'S3ObjectPermissions',
+              Effect: 'Allow',
+              Action: [
+                's3:AbortMultipartUpload',
+                's3:DeleteObject*',
+                's3:GetObject*',
+                's3:List*',
+                's3:PutObject*',
+              ],
+            }),
+            Match.objectLike({
+              Sid: 'EventBridgeManage',
+              Effect: 'Allow',
+              Action: [
+                'events:DeleteRule',
+                'events:DisableRule',
+                'events:EnableRule',
+                'events:PutRule',
+                'events:PutTargets',
+                'events:RemoveTargets',
+              ],
+              Condition: {
+                StringEquals: { 'events:ManagedBy': 'elasticfilesystem.amazonaws.com' },
+              },
+            }),
+            Match.objectLike({
+              Sid: 'EventBridgeRead',
+              Effect: 'Allow',
+              Action: [
+                'events:DescribeRule',
+                'events:ListRuleNamesByTarget',
+                'events:ListRules',
+                'events:ListTargetsByRule',
+              ],
+            }),
+          ]),
+        },
+      });
+    });
+
+    test('creates a mount target per public subnet', () => {
+      // The env-less test stack resolves to 2 dummy AZs -> 2 public subnets -> 2 mount targets.
+      template.resourceCountIs('AWS::S3Files::MountTarget', 2);
+    });
+
+    test('mounts the file system volume into the tailscale container at the statedir', () => {
+      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+        Volumes: Match.arrayWith([
+          Match.objectLike({
+            Name: 'tailscale-state',
+            S3FilesVolumeConfiguration: Match.objectLike({
+              FileSystemArn: Match.anyValue(),
+              RootDirectory: '/',
+            }),
+          }),
+        ]),
+        ContainerDefinitions: Match.arrayWith([
+          Match.objectLike({
+            Name: 'tailscale',
+            Environment: Match.arrayWith([{ Name: 'TS_STATE_DIR', Value: '/var/lib/tailscale' }]),
+            MountPoints: Match.arrayWith([
+              Match.objectLike({
+                SourceVolume: 'tailscale-state',
+                ContainerPath: '/var/lib/tailscale',
+                ReadOnly: false,
+              }),
+            ]),
+          }),
+        ]),
+      });
+    });
+
+    test('grants the task role the S3 Files client managed policy', () => {
+      template.hasResourceProperties('AWS::IAM::Role', {
+        ManagedPolicyArns: Match.arrayWith([
+          {
+            'Fn::Join': Match.arrayWith([
+              Match.arrayWith([Match.stringLikeRegexp('AmazonS3FilesClientFullAccess')]),
+            ]),
+          },
+        ]),
+      });
+    });
+
+    test('opens NFS (2049) from the task to the mount-target security group', () => {
+      template.hasResourceProperties('AWS::EC2::SecurityGroupIngress', {
+        IpProtocol: 'tcp',
+        FromPort: 2049,
+        ToPort: 2049,
+      });
+    });
   });
 
   test('exports key constructs for use by other stacks', () => {

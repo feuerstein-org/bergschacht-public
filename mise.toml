@@ -52,4 +52,5 @@ run = 'pnpm run cdk deploy ${usage_stacks:-"**"}'
 
 [tasks.refresh-manifest]
 description = "Dump SSM version manifest from CICD account to version-manifest.json"
+env = {AWS_PROFILE = 'cicd', AWS_REGION = 'us-east-1'}
 run = 'aws ssm get-parameters-by-path --path /bergschacht --recursive --query "Parameters[*].{Name:Name,Value:Value}" --output json > version-manifest.json && echo "Wrote version-manifest.json ($(jq length version-manifest.json) parameters)"'
