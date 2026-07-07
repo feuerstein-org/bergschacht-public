@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import { Template, Match, Capture } from 'aws-cdk-lib/assertions';
 import {
   FoerderturmConnectorsStack,
@@ -37,6 +38,7 @@ function createTestStack(connectors: ConnectorDefinition[]): {
 const EXAMPLE: ConnectorDefinition = {
   vendor: 'example',
   imageArtifact: TEST_CONNECTOR_IMAGE_ARTIFACT,
+  enabledInstrumentations: ['threading'],
 };
 
 describe('FoerderturmConnectorsStack', () => {
@@ -138,5 +140,136 @@ describe('FoerderturmConnectorsStack', () => {
     // PascalCase construct id derives the output name from the hyphenated vendor.
     multiTemplate.hasOutput('ConnectorOtherVendorFunctionName', {});
     expect(multi.functions.get('other-vendor')).toBeDefined();
+  });
+});
+
+/**
+ * Build a stack with a single bronze-writing connector (Sharadar-style): an S3 Tables sink, a
+ * staged source bucket to read, extra env vars, and a custom enabled-instrumentation set.
+ */
+function createBronzeConnectorStack(overrides: Partial<ConnectorDefinition> = {}): {
+  stack: FoerderturmConnectorsStack;
+  template: Template;
+} {
+  const app = new cdk.App();
+  const env = { account: '123456789012', region: 'us-east-1' };
+  const bucketStack = new cdk.Stack(app, 'TestBucket', { env });
+  const pipesMessagesBucket = new s3.Bucket(bucketStack, 'PipesBucket');
+  const stagingBucket = new s3.Bucket(bucketStack, 'StagingBucket');
+  const tableBucket = new s3tables.TableBucket(bucketStack, 'TableBucket', {
+    tableBucketName: 'test-erzlager',
+  });
+  const connectors: ConnectorDefinition[] = [
+    {
+      vendor: 'sharadar',
+      imageArtifact: TEST_CONNECTOR_IMAGE_ARTIFACT,
+      tableNamespace: {
+        namespaceName: 'bronze',
+        tableBucket,
+        tables: new Map([
+          [
+            'tbl-1',
+            {
+              tableArn: 'arn:aws:s3tables:us-east-1:123456789012:bucket/test-erzlager/table/tbl-1',
+            },
+          ],
+          [
+            'tbl-2',
+            {
+              tableArn: 'arn:aws:s3tables:us-east-1:123456789012:bucket/test-erzlager/table/tbl-2',
+            },
+          ],
+        ]),
+      },
+      stagingBucket,
+      enabledInstrumentations: ['threading', 'boto3'],
+      ...overrides,
+    },
+  ];
+  const stack = new FoerderturmConnectorsStack(app, 'TestConnectors', {
+    environment: 'test',
+    connectors,
+    pipesMessagesBucket,
+    env,
+  });
+  return { stack, template: Template.fromStack(stack) };
+}
+
+describe('FoerderturmConnectorsStack - bronze-writing connector', () => {
+  let template: Template;
+
+  beforeEach(() => {
+    ({ template } = createBronzeConnectorStack());
+  });
+
+  test('injects TABLE_BUCKET_ARN derived from the namespace bucket', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'foerderturm-connector-sharadar-test',
+      Environment: { Variables: Match.objectLike({ TABLE_BUCKET_ARN: Match.anyValue() }) },
+    });
+  });
+
+  test('merges extra environmentVars onto the function', () => {
+    const { template: withVars } = createBronzeConnectorStack({
+      environmentVars: { CUSTOM_FLAG: 'on' },
+    });
+    withVars.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: Match.objectLike({ CUSTOM_FLAG: 'on' }) },
+    });
+  });
+
+  test('enables exactly the requested instrumentations via the disabled complement', () => {
+    const disabled = new Capture();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({ OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: disabled }),
+      },
+    });
+    const disabledList = disabled.asString().split(',');
+    // Enabled: omitted from the disabled list.
+    expect(disabledList).not.toContain('threading');
+    expect(disabledList).not.toContain('boto3');
+    // Not enabled: still disabled.
+    expect(disabledList).toContain('requests');
+    expect(disabledList).toContain('logging');
+  });
+
+  test('throws at synth on an unknown instrumentation name', () => {
+    expect(() =>
+      createBronzeConnectorStack({ enabledInstrumentations: ['threading', 'bogus'] })
+    ).toThrow(/Unknown ADOT instrumentation/);
+  });
+
+  test('grants S3 Tables read/write scoped to the given tables, not all tables', () => {
+    // Read/write actions are present...
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Allow',
+            Action: Match.arrayWith(['s3tables:PutTableData']),
+          }),
+        ]),
+      },
+    });
+    // ...and resources are scoped to the specific tables, not the `table/*` wildcard.
+    const policies = JSON.stringify(Object.values(template.findResources('AWS::IAM::Policy')));
+    expect(policies).toContain('/table/tbl-1');
+    expect(policies).toContain('/table/tbl-2');
+    expect(policies).not.toContain('/table/*');
+  });
+
+  test('grants read on the staged source bucket', () => {
+    // grantRead emits the GetObject*/List* action set; the bucket ARN is a cross-stack token.
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Allow',
+            Action: Match.arrayWith([Match.stringLikeRegexp('s3:GetObject')]),
+          }),
+        ]),
+      },
+    });
   });
 });

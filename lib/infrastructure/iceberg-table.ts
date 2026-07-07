@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import { Construct } from 'constructs';
 import type { IcebergSchemaDefinition } from './iceberg-schema';
+import { validateSchemaDefinition } from './iceberg-schema';
 
 export interface IcebergTableProps {
   /**
@@ -56,6 +57,8 @@ export class IcebergTable extends Construct {
     super(scope, id);
 
     this.tableName = props.tableName;
+
+    validateSchemaDefinition(props.schema, props.tableName);
 
     const resource = new cdk.CustomResource(this, 'Resource', {
       serviceToken: props.serviceToken,

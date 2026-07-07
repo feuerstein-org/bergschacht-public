@@ -126,6 +126,11 @@ export class FoerderturmStack extends cdk.Stack {
   public readonly service: ecs.IFargateService;
   public readonly litestreamBucket: s3.IBucket;
   public readonly pipesMessagesBucket: s3.IBucket;
+  /**
+   * Bucket holding the Sharadar backfill CSV partitions (uploaded out-of-band). Passed to the
+   * connectors stack so the Sharadar Lambda can be granted read access.
+   */
+  public readonly sharadarStagingBucket: s3.IBucket;
   public readonly tailscaleSecret: ssm.IStringParameter;
   public readonly logGroup: logs.ILogGroup;
 
@@ -186,6 +191,25 @@ export class FoerderturmStack extends cdk.Stack {
         {
           id: 'AbortIncompleteMultipartUpload',
           abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+          enabled: true,
+        },
+      ],
+    });
+
+    // ---- Sharadar staging bucket ----
+    // Holds the Sharadar backfill CSV partitions, uploaded out-of-band (see
+    // scripts/split_and_upload.py in foerderturm). The Sharadar connector Lambda reads its per-year
+    // partitions from here; the orchestrator only builds the `s3://` source globs (no read access).
+    this.sharadarStagingBucket = new s3.Bucket(this, 'SharadarStagingBucket', {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      // RETAIN: the partitions are uploaded by hand, so don't drop them on a stack replace.
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: 'AbortIncompleteMultipartUpload',
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
           enabled: true,
         },
       ],
@@ -342,6 +366,7 @@ export class FoerderturmStack extends cdk.Stack {
 
     const litestreamEnv = {
       LITESTREAM_BUCKET: this.litestreamBucket.bucketName,
+      LITESTREAM_SYNC_INTERVAL: '60', // sync SQLite db every 60 seconds
     };
     const mountDagsterHome = (container: ecs.ContainerDefinition): void => {
       container.addMountPoints({
@@ -355,6 +380,9 @@ export class FoerderturmStack extends cdk.Stack {
     const pipesEnv: Record<string, string> = {
       PIPES_MESSAGES_BUCKET: this.pipesMessagesBucket.bucketName,
       CONNECTOR_EXAMPLE_LAMBDA_NAME: connectorFunctionName('example', environment),
+      CONNECTOR_SHARADAR_LAMBDA_NAME: connectorFunctionName('sharadar', environment),
+      // Dedicated bucket, so partitions are staged at the root (`<bucket>/sep/...`, `<bucket>/tickers/...`).
+      SHARADAR_STAGING_BUCKET: this.sharadarStagingBucket.bucketName,
     };
 
     // (1) Litestream restore - init container. Restores the three SQLite stores from S3 (no-op
@@ -563,6 +591,11 @@ export class FoerderturmStack extends cdk.Stack {
       value: this.pipesMessagesBucket.bucketName,
       description: 'S3 bucket for Dagster Pipes message chunks written by connector Lambdas',
     });
+    new cdk.CfnOutput(this, 'SharadarStagingBucketName', {
+      value: this.sharadarStagingBucket.bucketName,
+      description:
+        'S3 bucket to upload the Sharadar backfill CSV partitions into (sep/, tickers/).',
+    });
     new cdk.CfnOutput(this, 'TailscaleSecretName', {
       value: this.tailscaleSecret.parameterName,
       description:
@@ -590,6 +623,14 @@ export class FoerderturmStack extends cdk.Stack {
       {
         id: 'AwsSolutions-VPC7',
         reason: 'Flow logs disabled - no real traffic, only dagster.',
+      },
+    ]);
+
+    NagSuppressions.addResourceSuppressions(this.sharadarStagingBucket, [
+      {
+        id: 'AwsSolutions-S1',
+        reason:
+          'Holds re-uploadable Sharadar source CSVs for a one-off backfill; access logging not warranted.',
       },
     ]);
 

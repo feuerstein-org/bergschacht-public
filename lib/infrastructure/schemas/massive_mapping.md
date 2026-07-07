@@ -1,5 +1,7 @@
 # Massive -> Bronze Layer Mapping
 
+> **Ticker conventions vary by feed.** Most Massive feeds report the **as-of-date** symbol (PIT-safe), but the **IPO** feed is name-adjusted ("META instead of FB") and **Ticker Events** are queried by current ticker - both are _current-labeled_ and must not be resolved point-in-time on the event date. See [`DATA_DESIGN.md` -> Vendor ticker semantics](../../../DATA_DESIGN.md) and the resolution contract in [`bronze_to_gold_mapping.md`](./bronze_to_gold_mapping.md). Massive carries identity via `composite_figi` / `share_class_figi` (and CIK), so it has no permaticker-style `entity_id`.
+
 ## Ingestion Strategy
 
 The All Tickers API (`GET /v3/reference/tickers`) is called with a specific `date` parameter to discover all available tickers on that date. For each ticker returned, the Ticker Overview API (`GET /v3/reference/tickers/{ticker}`) is called with the same `date` to retrieve detailed attributes. Together, these two APIs populate `BRONZE_SECURITY_MASTER`, `BRONZE_FACT_DAILY_INSTRUMENT_METRICS` and `BRONZE_FACT_CORPORATE_ACTIONS`.
@@ -89,8 +91,6 @@ Not name adjusted, splits are reported for whatever ticker name was used at the 
 | `adjustment_type`         | `raw_action_type` | `forward_split`, `reverse_split`, or `stock_dividend` |
 | `adjustment_type`         | `action_type`     | See mapping table below                               |
 | `execution_date`          | `effective_date`  | Date when split was applied                           |
-| `split_from`              | `split_from`      | Raw vendor denominator (old shares)                   |
-| `split_to`                | `split_to`        | Raw vendor numerator (new shares)                     |
 | `split_to` / `split_from` | `split_ratio`     | Computed: `split_to / split_from`                     |
 
 ### `adjustment_type` -> `action_type` mapping
@@ -103,9 +103,11 @@ Not name adjusted, splits are reported for whatever ticker name was used at the 
 
 ### Dropped fields
 
-| Massive field                  | Reason                                                       |
-| ------------------------------ | ------------------------------------------------------------ |
-| `historical_adjustment_factor` | Vendor-adjusted cumulative factor, stale after future events |
+| Massive field                  | Reason                                                        |
+| ------------------------------ | ------------------------------------------------------------- |
+| `split_from`                   | No need to store this, only useful for dashboards later maybe |
+| `split_to`                     | No need to store this, only useful for dashboards later maybe |
+| `historical_adjustment_factor` | Vendor-adjusted cumulative factor, stale after future events  |
 
 ---
 
@@ -148,7 +150,6 @@ Name-adjusted - META is reported instead of FB.
 | --------------------- | ---------------------- | ----------------------------- |
 | `ticker`              | `ticker`               |                               |
 | `ipo_status`          | `raw_action_type`      | Raw status preserved as-is    |
-| `ipo_status`          | `action_status`        | See mapping table below       |
 | `listing_date`        | `effective_date`       | First trading date            |
 | `final_issue_price`   | `ipo_offer_price`      |                               |
 | `lowest_offer_price`  | `ipo_price_range_low`  |                               |
@@ -186,6 +187,7 @@ Currently Massive has data quality issues with IPO data, specifically values bes
 | `min_shares_offered`   | Not in schema                                                                 |
 | `lot_size`             | Not in schema                                                                 |
 | `issue_start_date`     | Not in schema                                                                 |
+| `ipo_status`           | Not in schema, we only store completed ipos (no rumors etc)                   |
 | `issue_end_date`       | Not in schema                                                                 |
 | `announced_date`       | Not in schema, the records we ingest now don't have announcements (`history`) |
 

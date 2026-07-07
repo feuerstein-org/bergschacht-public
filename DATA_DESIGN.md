@@ -27,7 +27,7 @@ Data flows through a three-layer medallion architecture: **Bronze -> Silver (vir
 
 Bronze tables store raw vendor data exactly as delivered - no transformations beyond adding ingestion metadata (`ingested_at`, `pipeline_run_id`) and some minimal mapping (e.g. MIC codes for exchanges). Each vendor's feed produces its own rows, so the same instrument on the same date may appear multiple times, once per vendor.
 
-Ingestion uses **change-detected append**: a `record_hash` (SHA-256 of all content columns) is compared against the latest row for the same natural key. A new row is only written when the hash differs, keeping storage bounded while preserving the full audit trail. Note that this only applies to SCD2 tables, for tables that store daily pricing for example we accept potential duplicates and filter them out either separately or they get removed in the pipeline to gold.
+Ingestion uses **change-detected append**: a `record_hash` (SHA-256 of all content columns) is compared against the latest row for the same natural key. A new row is only written when the hash differs, keeping storage bounded while preserving the full audit trail. Note that this only applies to SCD2 tables, for tables that store daily pricing for example we accept potential duplicates and filter them out either separately or they get removed in the pipeline to gold (see [Incremental ingestion & restatements](#incremental-ingestion--restatements) for how those duplicates arise and are resolved).
 
 #### Bronze time columns
 
@@ -45,22 +45,27 @@ We deliberately do **not** partition or optimise bronze for per-ticker access. B
 
 #### Backfill ingestion (partitioned)
 
-Large historical vendor files (e.g. Sharadar SEP: ~3 GB / 46M rows of daily prices)
-are too big to transform-and-write in a single Lambda. For the one-time backfill we
-split the source file once into **per-year partitions** in a staging S3 bucket
-(`year=YYYY/…`), then ingest **one partition per Lambda invocation**, driven by a
-date-partitioned Dagster asset. One year (≤2.1M rows) fits comfortably in a Lambda
-(10 GB / 15 min), keeping orchestration Lambda-only instead of a long-running ECS
-task. The processing partition (year) is independent of the Iceberg storage
-partition (price month) - a year's rows simply land across the relevant monthly
-partitions. Date-keyed fact tables (OHLCV, daily metrics) use this; snapshot
-dimensions like `security_master` are small enough to ingest in a single invocation.
-This implies the IaC provides a **staging bucket** for the split partitions and a
-Lambda sized for one partition, and that the orchestrator task def passes
-`SHARADAR_STAGING_PREFIX` (the staging `s3://…/sharadar` prefix) and
-`CONNECTOR_SHARADAR_LAMBDA_NAME` to the Dagster code, which exposes the
-`sharadar_ohlcv` (yearly-partitioned) and `sharadar_security_master` Pipes assets.
+Large historical vendor files (for now only Sharadar SEP: ~3 GB / 46M rows of daily prices) are too big to transform-and-write in a single Lambda. For the one-time backfill we split the source file once into **per-year partitions** in a staging S3 bucket
+(`year=YYYY/…`), then ingest **one partition per Lambda invocation**, driven by a date-partitioned Dagster asset. One year (≤2.1M rows) fits comfortably in a Lambda (10 GB / 15 min), keeping orchestration Lambda-only instead of a long-running ECS task.
+
+The processing partition (year) is independent of the Iceberg storage partition (price month) - a year's rows simply land across the relevant monthly partitions. Date-keyed fact tables (OHLCV, daily metrics) use this; snapshot dimensions like `security_master` are small enough to ingest in a single invocation. This implies the IaC provides a **staging bucket** for the split partitions and a Lambda sized for one partition, and that the orchestrator task def passes `SHARADAR_STAGING_PREFIX` (the staging `s3://…/sharadar` prefix) and `CONNECTOR_SHARADAR_LAMBDA_NAME` to the Dagster code, which exposes the `sharadar_ohlcv` (yearly-partitioned) and `sharadar_security_master` Pipes assets.
+
 (Split/upload tooling lives in `foerderturm`'s `scripts/split_and_upload.py`.)
+
+#### Incremental ingestion & restatements
+
+After the one-time backfill, the date-keyed fact tables (OHLCV, daily metrics) are kept current incrementally. A vendor can also **restate** a past-dated row, we capture restatements deliberately by creating duplicates.
+
+- **How we detect restatements:** a **`lastupdated`-watermark incremental** (change-data-capture). Each run pulls every vendor row whose `lastupdated` (-> `vendor_as_of_ts`) is greater than the highest `vendor_as_of_ts` already in bronze, then advances the watermark. That one query returns both **new dates** and **revised past-dated rows** in the same slice - a 2015 metric the vendor recomputed yesterday carries `lastupdated = yesterday`, so it falls into the window even though its `metric_date` is old. This is the entire reason these rows carry `vendor_as_of_ts`. (Pure "new dates only" loading would never revisit old dates and would silently miss restatements; vendors with no freshness column - e.g. Sharadar ACTIONS - cannot use this and are instead re-ingested in full with change-detection.)
+
+Two distinct things therefore produce multiple bronze rows for the same `(vendor, identity, date)`, and `vendor_as_of_ts` separates them:
+
+| Cause                     | How it arises                                                                                                       | `vendor_as_of_ts` | Content        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------- |
+| **Restatement**           | deliberate `lastupdated`-watermark re-pull                                                                          | **newer**         | revised        |
+| **Operational duplicate** | at-least-once execution: retries, manual re-runs, overlapping backfill partitions re-processing the **same source** | **same**          | byte-identical |
+
+Both collapse in the bronze -> gold pipeline with one rule: keep the latest row per `(resolved identity, date)` ordered by `vendor_as_of_ts DESC, ingested_at DESC`. Restatements win on `vendor_as_of_ts`; operational duplicates are byte-identical so the `ingested_at` tiebreak is immaterial. Crucially, gold dedup only _resolves_ whatever landed - it is the watermark pull that _guarantees_ a restatement is present to be picked; nothing relies on a coincidental retry.
 
 ### Silver (Virtual)
 
@@ -85,6 +90,23 @@ This is a deliberate choice since resolution is a revisable judgment; bronze is 
 A ticker symbol is **not** a stable identifier. It is reused across unrelated companies over time and changes for a single company. The symbol `S`, for example, was held in turn by Sears, then Sprint, then SentinelOne. Vendors disambiguate inconsistently - Sharadar exposes the collisions as `S`, `S1`, `S2`, while other vendors name them differently.
 
 Because of this, the pipeline resolves on `(source_vendor, ticker, date)` **point-in-time** against the reconciled security master (or the vendors security master) rather than on the ticker string alone. Cases that cannot be resolved deterministically, or where vendors disagree on identity, are written to `gold.fact_identifier_conflicts` and block the affected instrument from the golden copy until a steward resolves them.
+
+### Vendor ticker semantics: name-adjusted vs not name-adjusted
+
+Point-in-time resolution on `(source_vendor, ticker, date)` assumes the vendor reports the symbol that was in use **on the event date**. That assumption does not hold for every feed, so the resolver must know, per feed, which convention a `ticker` follows:
+
+- **As-of-date** - the symbol as of the event/observation date. PIT-safe: resolve `(vendor, ticker, date)` directly. Examples: snapshot dimensions queried with a `date` parameter (Massive All Tickers / Ticker Overview), Massive's Splits and Dividends feeds ("not name adjusted").
+- **Current-labeled** - the security's _current_ symbol stamped onto all of its history, rewritten on every pull. PIT resolution is **unsafe** here: a 2015 Facebook bar/event labeled `META` would resolve into Meta Materials, which held `META` in 2015 (ticker reuse). **All Sharadar tables are current-labeled**, as are Massive's IPO feed ("name-adjusted - META instead of FB") and Ticker Events feed. Current-labeled feeds are resolved one of two ways:
+
+#### Resolving current-labeled feeds
+
+There are two strategies, and Sharadar uses **both**, chosen per table by the bronze append mode:
+
+1. **Stable key stamped at ingest** - used by `bronze.fact_corporate_actions`. The connector joins the same-pull TICKERS export and writes `vendor_record_id` = permaticker on every row. Gold resolves **directly by `vendor_record_id`** -> Sharadar `security_master` -> internal id.
+
+2. **Ticker resolved as-of ingest time** - used by `bronze.fact_daily_ohlcv`, which carries only the raw `ticker` (no `vendor_record_id`). The enabling fact: a row's `ticker` reflects the symbol that was current **when the row was ingested** (`ingested_at`), _not_ on `price_date` - a one-time 2024 backfill labels even a 2015 bar `META`. So gold maps `ticker -> permaticker` against the Sharadar `security_master` snapshot active around the row's **`ingested_at`** (transaction time), **not** its event date. Keying on `ingested_at` is what disambiguates ticker reuse: a 2024-ingested `META` bar resolves against the 2024 snapshot (Facebook), never the 2015 one (Meta Materials). This requires retaining a `security_master` snapshot near each price ingest; rows with no matching snapshot are unresolvable and route to conflicts.
+
+We place `vendor_record_id` in the actions table because we always process the entire actions table provided by sharadar (in case of corrections) and only append new rows (change-detected append). This means we need a good way to detect a change without relying on the ticker which can change. For the ohlcv table on the other hand we ingest only the newest rows for the day (assuming daily incremental runs) and use `vendor_as_of_ts` to find restatements. ACTIONS table doesn't provide a column like this so we have to rely on matching by `vendor_record_id`. E.g. if the `vendor_record_id` is the same for a split for a row from 2015 it is a restatement even though the current version of the row says `FB` and the incoming one `META`.
 
 ---
 

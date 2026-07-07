@@ -55,7 +55,12 @@ export const BRONZE_SECURITY_MASTER: IcebergSchemaDefinition = {
       required: true,
       doc: "Data vendor name, e.g. 'OPENFIGI', 'REFINITIV', 'BLOOMBERG'",
     },
-    { name: 'entity_id', type: 'string', doc: "Vendor's own primary key for this record" },
+    {
+      name: 'vendor_record_id',
+      type: 'string',
+      renamedFrom: 'entity_id',
+      doc: "Vendor's own stable per-security identifier (e.g. Sharadar `permaticker`).",
+    },
     {
       name: 'snapshot_date',
       type: 'date',
@@ -70,21 +75,19 @@ export const BRONZE_SECURITY_MASTER: IcebergSchemaDefinition = {
     // { name: 'mgecs_code', type: 'string', doc: 'Morningstar Global Equity Classification code' },
     { name: 'sic_code', type: 'string', doc: 'SIC code' },
     {
-      name: 'incorporation_country',
-      type: 'string',
-      doc: 'Country of incorporation (ISO 3166-1 alpha-2)',
-    },
-    {
       name: 'reporting_currency',
       type: 'string',
       doc: "Company's functional reporting currency for financial statements (ISO 4217).",
     },
-    { name: 'cusip_list', type: 'string', doc: 'List of all CUSIPs for this entity' }, // TODO: make an actual list
 
     // Instrument-level
-    { name: 'cusip', type: 'string', doc: 'CUSIP' },
+    { name: 'cusip', type: 'string', doc: 'Primary/current CUSIP for this instrument' },
     // { name: 'isin', type: 'string', doc: 'ISIN' },
-    { name: 'cusip_history', type: 'string', doc: 'List of historical CUSIPs' },
+    {
+      name: 'cusip_history',
+      type: 'list<string>',
+      doc: 'All CUSIPs ever associated with this instrument (full history, includes the current one). Entity-level rollups across share classes are a gold-layer derivation, not stored here.',
+    },
     { name: 'share_class_figi', type: 'string', doc: 'Bloomberg Share Class FIGI' },
     {
       name: 'instrument_type',
@@ -96,7 +99,7 @@ export const BRONZE_SECURITY_MASTER: IcebergSchemaDefinition = {
       type: 'string',
       doc: 'Human-readable instrument description',
     },
-    { name: 'related_tickers', type: 'string', doc: 'Related tickers' }, // TODO: make an actual list
+    { name: 'related_tickers', type: 'list<string>', doc: 'Related tickers' },
 
     // Listing-level
     { name: 'ticker', type: 'string', doc: 'Ticker symbol' },
@@ -106,7 +109,12 @@ export const BRONZE_SECURITY_MASTER: IcebergSchemaDefinition = {
     { name: 'trading_currency', type: 'string', doc: 'Trading currency of the listing (ISO 4217)' },
     { name: 'listing_status', type: 'string', doc: "Listing status, e.g. 'ACTIVE', 'DELISTED'" },
     { name: 'round_lot', type: 'int', doc: 'Round lot size' },
-    { name: 'location', type: 'string', doc: 'HQ location (e.g. California; U.S.A)' },
+    {
+      name: 'hq_location',
+      type: 'string',
+      renamedFrom: 'location',
+      doc: 'HQ location (e.g. California; U.S.A)',
+    },
     { name: 'company_website', type: 'string', doc: 'Company website URL' },
 
     // Provenance
@@ -121,6 +129,10 @@ export const BRONZE_SECURITY_MASTER: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'snapshot_date', transform: 'month', name: 'snapshot_month' },
   ],
+  // TODO: Figure out best sortOrder this is currently not the best I believe
+  // Need to figure out what queries gold pipeline will do and based on that create the
+  // correct sort order - e.g. since this is SCD2-ish maybe sort by ticker?
+  // Then again this is a small table so it shouldn't matter much
   sortOrder: [{ sourceColumn: 'snapshot_date', direction: 'asc', nullOrder: 'nulls-last' }],
 };
 
@@ -167,6 +179,10 @@ export const BRONZE_FACT_DAILY_OHLCV: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'price_date', transform: 'month', name: 'price_month' },
   ],
+  // TODO: Same as above - theoretically here by ticker might be better if we
+  // analyze each ticker one by one and compare them against other vendors
+  // even if we go by time partitions - e.g. a month we probably compare a
+  // ticker over a span of a month and then the next ticker etc. right?
   sortOrder: [{ sourceColumn: 'price_date', direction: 'asc', nullOrder: 'nulls-last' }],
 };
 
@@ -187,6 +203,12 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
   columns: [
     { name: 'source_vendor', type: 'string', required: true, doc: 'Data vendor name' },
     { name: 'action_id', type: 'string', doc: "Vendor's own ID for this action (deduplication)" },
+    {
+      name: 'vendor_record_id',
+      type: 'string',
+      renamedFrom: 'entity_id',
+      doc: "Vendor's stable per-security key - used for identifying the instrument if the vendor inconsistently changes the ticker symbol.",
+    },
 
     // Unresolved vendor identifiers
     ...BRONZE_VENDOR_IDENTIFIER_COLUMNS,
@@ -203,7 +225,6 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
       type: 'string',
       doc: "Vendor's original action classification before normalisation",
     },
-    { name: 'action_status', type: 'string', doc: 'ANNOUNCED, PENDING, COMPLETED, CANCELLED' }, // TODO: I think we only need COMPLETED for now
 
     // Common dates
     { name: 'effective_date', type: 'date', required: true, doc: 'Date the action took effect' },
@@ -211,16 +232,6 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
     { name: 'pay_date', type: 'date', doc: 'Payment date (for dividends)' },
 
     // Split / Reverse split fields
-    {
-      name: 'split_from',
-      type: BRONZE_DECIMAL_TYPE,
-      doc: 'Vendor-reported split denominator (old shares), e.g. 1 in a 2-for-1 split',
-    },
-    {
-      name: 'split_to',
-      type: BRONZE_DECIMAL_TYPE,
-      doc: 'Vendor-reported split numerator (new shares), e.g. 2 in a 2-for-1 split',
-    },
     {
       name: 'split_ratio',
       type: BRONZE_DECIMAL_TYPE,
@@ -237,19 +248,24 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
       doc: 'Payouts in a year, 2 = semi-annual, 4 = quarterly, 12 = monthly etc.',
     },
 
-    // Counterparty fields (M&A, spinoff, ticker change)
+    // Counterparty fields (M&A, spinoff)
     {
-      name: 'counterparty_ticker',
+      name: 'related_ticker',
       type: 'string',
-      doc: 'Counterparty ticker (acquirer/target, spunoff entity, new ticker)',
+      doc: 'The acquirer (ACQUISITION), the surviving company (MERGER), the spun-off entity (SPINOFF) or the name when the company was listed (LISTING). ',
     },
-    { name: 'counterparty_name', type: 'string', doc: 'Counterparty entity name' },
+    { name: 'related_name', type: 'string', doc: 'Related entity name (see related_ticker)' },
 
     // Spinoff fields
     {
       name: 'distribution_ratio',
       type: BRONZE_DECIMAL_TYPE,
       doc: 'Shares of the spunoff entity distributed per share of the parent. NOT a price-adjustment factor - the parent price drop depends on the spunoff entity price.',
+    },
+    {
+      name: 'distribution_value',
+      type: BRONZE_DECIMAL_TYPE,
+      doc: 'USD/share dollar value of the spunoff shares distributed per share of the parent - the same spinoff event valued in dollars rather than as a share ratio.',
     },
 
     // IPO fields
@@ -281,7 +297,7 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
     {
       name: 'record_hash',
       type: 'string',
-      doc: 'SHA-256 of all content columns, excludes provenance columns',
+      doc: 'SHA-256 of all content columns, excludes provenance columns. Connectors whose vendor retroactively relabels `ticker` to the current symbol (e.g. Sharadar) additionally exclude `ticker`.',
     },
     ...BRONZE_PROVENANCE_COLUMNS,
   ],
@@ -289,6 +305,7 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'effective_date', transform: 'month', name: 'effective_month' },
   ],
+  // TODO: Same as above
   sortOrder: [
     { sourceColumn: 'effective_date', direction: 'asc', nullOrder: 'nulls-last' },
     { sourceColumn: 'action_type', direction: 'asc', nullOrder: 'nulls-last' },
@@ -350,31 +367,44 @@ export const BRONZE_FACT_DAILY_METRICS: IcebergSchemaDefinition = {
     { name: 'ev_currency', type: 'string', doc: 'Currency for enterprise value / market cap' },
 
     // Valuation ratios
-    { name: 'ev_ebit', type: BRONZE_DECIMAL_TYPE, doc: 'Enterprise value / EBIT' },
-    { name: 'ev_ebitda', type: BRONZE_DECIMAL_TYPE, doc: 'Enterprise value / EBITDA' },
     {
-      name: 'price_book',
+      name: 'ev_to_ebit',
       type: BRONZE_DECIMAL_TYPE,
+      renamedFrom: 'ev_ebit',
+      doc: 'Enterprise value / EBIT',
+    },
+    {
+      name: 'ev_to_ebitda',
+      type: BRONZE_DECIMAL_TYPE,
+      renamedFrom: 'ev_ebitda',
+      doc: 'Enterprise value / EBITDA',
+    },
+    {
+      name: 'price_to_book',
+      type: BRONZE_DECIMAL_TYPE,
+      renamedFrom: 'price_book',
       doc: 'Price / book value (market cap / equity)',
     },
     {
-      name: 'price_earnings',
+      name: 'price_to_earnings',
       type: BRONZE_DECIMAL_TYPE,
+      renamedFrom: 'price_earnings',
       doc: 'Price / earnings (Damodaran method)',
     },
-    { name: 'price_sales', type: BRONZE_DECIMAL_TYPE, doc: 'Price / sales (Damodaran method)' },
+    {
+      name: 'price_to_sales',
+      type: BRONZE_DECIMAL_TYPE,
+      renamedFrom: 'price_sales',
+      doc: 'Price / sales (Damodaran method)',
+    },
 
     // Provenance
-    {
-      name: 'record_hash',
-      type: 'string',
-      doc: 'SHA-256 of all content columns, excludes provenance columns',
-    },
     ...BRONZE_PROVENANCE_COLUMNS,
   ],
   partitionSpec: [
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'metric_date', transform: 'month', name: 'metric_month' },
   ],
+  // TODO: Same as above
   sortOrder: [{ sourceColumn: 'metric_date', direction: 'asc', nullOrder: 'nulls-last' }],
 };

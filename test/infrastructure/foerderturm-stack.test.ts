@@ -59,8 +59,8 @@ describe('FoerderturmStack', () => {
   });
 
   test('creates a Litestream S3 bucket with KMS encryption and versioning', () => {
-    // litestream + pipes-messages + tailscale-state file system bucket
-    template.resourceCountIs('AWS::S3::Bucket', 3);
+    // litestream + pipes-messages + sharadar-staging + tailscale-state file system bucket
+    template.resourceCountIs('AWS::S3::Bucket', 4);
     template.hasResourceProperties('AWS::S3::Bucket', {
       VersioningConfiguration: { Status: 'Enabled' },
       BucketEncryption: {
@@ -110,6 +110,22 @@ describe('FoerderturmStack', () => {
         ]),
       },
     });
+  });
+
+  test('creates a retained Sharadar staging bucket and exposes it on the construct', () => {
+    template.hasResource('AWS::S3::Bucket', {
+      DeletionPolicy: 'Retain',
+      Properties: Match.objectLike({
+        BucketEncryption: {
+          ServerSideEncryptionConfiguration: [
+            Match.objectLike({ ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } }),
+          ],
+        },
+        PublicAccessBlockConfiguration: Match.objectLike({ BlockPublicAcls: true }),
+      }),
+    });
+    template.hasOutput('SharadarStagingBucketName', {});
+    expect(stack.sharadarStagingBucket).toBeDefined();
   });
 
   test('references the Tailscale OAuth SSM SecureString parameter on the tailscale container', () => {
@@ -163,7 +179,10 @@ describe('FoerderturmStack', () => {
               'litestream restore .*runs\\.db.*event_log\\.db.*schedules\\.db.*chown -R 1000:1000'
             ),
           ],
-          Environment: Match.arrayWith([Match.objectLike({ Name: 'LITESTREAM_BUCKET' })]),
+          Environment: Match.arrayWith([
+            Match.objectLike({ Name: 'LITESTREAM_BUCKET' }),
+            Match.objectLike({ Name: 'LITESTREAM_SYNC_INTERVAL' }),
+          ]),
           MountPoints: Match.arrayWith([
             Match.objectLike({ SourceVolume: 'dagster-home', ContainerPath: '/app/dagster_home' }),
           ]),
@@ -219,7 +238,10 @@ describe('FoerderturmStack', () => {
           Image: imageWithTag(TEST_LITESTREAM_IMAGE_ARTIFACT.imageTag),
           Essential: true,
           Command: ['replicate', '-config', '/etc/litestream.yml'],
-          Environment: Match.arrayWith([Match.objectLike({ Name: 'LITESTREAM_BUCKET' })]),
+          Environment: Match.arrayWith([
+            Match.objectLike({ Name: 'LITESTREAM_BUCKET' }),
+            Match.objectLike({ Name: 'LITESTREAM_SYNC_INTERVAL' }),
+          ]),
           DependsOn: Match.arrayWith([
             Match.objectLike({ ContainerName: 'dagster-init', Condition: 'SUCCESS' }),
           ]),
@@ -256,6 +278,11 @@ describe('FoerderturmStack', () => {
     const pipesEnv = Match.arrayWith([
       Match.objectLike({ Name: 'PIPES_MESSAGES_BUCKET' }),
       { Name: 'CONNECTOR_EXAMPLE_LAMBDA_NAME', Value: 'foerderturm-connector-example-test' },
+      { Name: 'CONNECTOR_SHARADAR_LAMBDA_NAME', Value: 'foerderturm-connector-sharadar-test' },
+      Match.objectLike({
+        Name: 'SHARADAR_STAGING_BUCKET',
+        Value: { Ref: Match.stringLikeRegexp('SharadarStagingBucket') },
+      }),
     ]);
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([

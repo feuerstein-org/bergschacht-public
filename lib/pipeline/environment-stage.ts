@@ -92,7 +92,7 @@ export class EnvironmentStage extends cdk.Stage {
     // ---------------------------------------------------------------
     // Bronze namespace - raw, append-only vendor data
     // ---------------------------------------------------------------
-    new TableNamespaceStack(this, 'S3TablesBronzeNamespace', {
+    const bronze = new TableNamespaceStack(this, 'S3TablesBronzeNamespace', {
       tableBucket: erzlager.tableBucket,
       namespaceName: 'bronze',
       encryptionKey: dataEncryptionKey.key,
@@ -114,11 +114,11 @@ export class EnvironmentStage extends cdk.Stage {
     // TODO: Eventually add ServiceEncryptionKey which not encrypt data related to services.
     // Currently not done to reduce complexity & KMS cost
 
-    // foerderturm Dagster orchestrator. desiredCount=0 keeps dev/staging off by default
+    // foerderturm Dagster orchestrator. desiredCount=0 keeps dev/staging off by default.
     const foerderturmConfig = {
       [devAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-dev' },
       [stageAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-stage' },
-      [prodAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-prod' }, // TODO: Set to 1 when production is fully running
+      [prodAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-prod' }, // TODO: Set desiredCount to 1 when production is fully running
     }[props.accountId];
 
     if (foerderturmConfig) {
@@ -149,8 +149,22 @@ export class EnvironmentStage extends cdk.Stage {
         {
           vendor: 'example',
           imageArtifact: foerderturmImage('connector-example-lambda-container'),
+          enabledInstrumentations: ['threading'],
         },
       ];
+
+      // Sharadar ships in foerderturm 0.2.0; prod is still pinned to 0.1.5 (no Sharadar image), so
+      // only wire it where the live manifest is used. Drop this guard together with the prod pin.
+      if (props.accountId !== prodAccount) {
+        connectors.push({
+          vendor: 'sharadar',
+          imageArtifact: foerderturmImage('connector-sharadar-lambda-container'),
+          tableNamespace: bronze,
+          memoryMiB: 2048,
+          stagingBucket: foerderturm.sharadarStagingBucket,
+          enabledInstrumentations: ['threading'],
+        });
+      }
       new FoerderturmConnectorsStack(this, 'FoerderturmConnectors', {
         environment: props.environment,
         connectors,

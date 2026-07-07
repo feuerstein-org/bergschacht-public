@@ -38,7 +38,7 @@ export const BRONZE_PROVENANCE_COLUMNS: readonly IcebergColumn[] = [
   {
     name: 'pipeline_run_id',
     type: 'string',
-    doc: 'FK to pipeline execution log (Airflow run ID etc.)',
+    doc: 'FK to pipeline execution log.',
   },
 
   // { name: 'is_correction', type: 'boolean', doc: 'Whether this record corrects a previously ingested row' },
@@ -65,6 +65,7 @@ export const BRONZE_FISCAL_PERIOD_COLUMNS: readonly IcebergColumn[] = [
   { name: 'fiscal_period_end_date', type: 'date', doc: 'End of the fiscal period' },
 ] as const;
 
+// TODO: Is this needed?
 /**
  * Financial statement metadata columns shared across bronze income statement,
  * balance sheet, and cash flow tables.

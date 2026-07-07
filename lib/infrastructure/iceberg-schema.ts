@@ -51,6 +51,33 @@ export interface IcebergColumn {
    * Human-readable documentation for this column.
    */
   readonly doc?: string;
+
+  /**
+   * Name of a pre-existing column that this column was renamed *from*.
+   *
+   * When set, the table-manager issues a true Iceberg `rename_column` - which
+   * preserves the field id and all existing data (and lets partition / sort
+   * references follow automatically) - instead of dropping the old column and
+   * adding a new, empty one.
+   *
+   * ⚠️ This is a **transient migration directive requiring TWO deploys**:
+   *
+   *  1. Deploy with `renamedFrom` set. The rename runs against every environment.
+   *  2. Once every environment has deployed step 1, remove `renamedFrom` in a
+   *     follow-up commit, leaving only the new `name`.
+   *
+   * ⚠️ Superseded pipelines make step 2 dangerous: under the default SUPERSEDED
+   * execution mode (CDK Pipelines / CodePipeline), a quickly-merged deploy 2 can
+   * leapfrog deploy 1 at a stage transition and hit a not-yet-renamed table with no
+   * `renamedFrom` present - the reconciler then DROPS the old column (losing its
+   * data) and adds an empty new one. Keep the directive until deploy 1 is confirmed
+   * everywhere, and/or run the pipeline in QUEUED mode / gate the two deploys.
+   *
+   * The rename is idempotent and self-deactivating, so leaving it in place does
+   * not re-run, inherently there's no downside leaving it unless you want to re-use
+   * the old name.
+   */
+  readonly renamedFrom?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,4 +189,57 @@ export interface IcebergSchemaDefinition {
    * @default [] - unsorted
    */
   readonly sortOrder?: IcebergSortField[];
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a schema definition at synth time, throwing on invariant violations.
+ *
+ * The most important check guards the {@link IcebergColumn.renamedFrom}:
+ * a rename directive is transient and must be removed once deployed everywhere.
+ * If the old name is reintroduced as a live column while the directive still
+ * points at it, the table-manager's rename pass would silently hijack that new
+ * column - so we reject the collision here.
+ *
+ * @param schema - the schema definition to validate
+ * @param tableName - used only to make error messages actionable
+ * @throws Error if any invariant is violated
+ */
+export function validateSchemaDefinition(schema: IcebergSchemaDefinition, tableName: string): void {
+  const errors: string[] = [];
+  const columnNames = new Set(schema.columns.map((c) => c.name));
+
+  const renameSources = schema.columns
+    .filter((c): c is IcebergColumn & { renamedFrom: string } => c.renamedFrom !== undefined)
+    .map((c) => c.renamedFrom);
+
+  for (const src of renameSources) {
+    if (columnNames.has(src)) {
+      errors.push(
+        `column 'renamedFrom' = '${src}' collides with a live column of the same name. ` +
+          `A rename directive is transient: once the rename has deployed to every ` +
+          `environment, remove 'renamedFrom' (second deploy) before reintroducing a ` +
+          `column named '${src}'. Leaving it in place would make the table-manager ` +
+          `rename (and empty) that column on the next deploy.`
+      );
+    }
+  }
+
+  // Two columns cannot both claim to be renamed from the same source.
+  const seen = new Set<string>();
+  for (const src of renameSources) {
+    if (seen.has(src)) {
+      errors.push(`multiple columns declare 'renamedFrom' = '${src}'`);
+    }
+    seen.add(src);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid Iceberg schema for table '${tableName}':\n  - ${errors.join('\n  - ')}`
+    );
+  }
 }

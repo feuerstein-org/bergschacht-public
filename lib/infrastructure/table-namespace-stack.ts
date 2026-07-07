@@ -51,12 +51,17 @@ export interface TableNamespaceStackProps extends cdk.StackProps {
  * so they can be independently created / updated / deleted.
  */
 export class TableNamespaceStack extends cdk.Stack {
+  public readonly tableBucket: s3tables.ITableBucket;
+  public readonly namespaceName: string;
   public readonly namespace: s3tables.INamespace;
   // Map from table name to the {@link IcebergTable} construct.
   public readonly tables: ReadonlyMap<string, IcebergTable>;
 
   constructor(scope: Construct, id: string, props: TableNamespaceStackProps) {
     super(scope, id, props);
+
+    this.tableBucket = props.tableBucket;
+    this.namespaceName = props.namespaceName;
 
     this.namespace = new s3tables.Namespace(this, 'Namespace', {
       namespaceName: props.namespaceName,
