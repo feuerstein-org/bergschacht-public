@@ -81,96 +81,89 @@ export class EnvironmentStage extends cdk.Stage {
     });
 
     // ---------------------------------------------------------------
-    // Shared erzlager table bucket
+    // Storage (S3 Tables) and the foerderturm orchestrator are not
+    // deployed to prod yet. Prod only gets SnsPagerDuty + the data
+    // encryption key above.
     // ---------------------------------------------------------------
-    const erzlager = new TableBucketStack(this, 'S3TablesErzlager', {
-      tableBucketName: `example-erzlager-${id}`.toLowerCase(),
-      encryptionKey: dataEncryptionKey.key,
-      env: { account: props.accountId, region: props.awsRegion },
-    });
-
-    // ---------------------------------------------------------------
-    // Bronze namespace - raw, append-only vendor data
-    // ---------------------------------------------------------------
-    const bronze = new TableNamespaceStack(this, 'S3TablesBronzeNamespace', {
-      tableBucket: erzlager.tableBucket,
-      namespaceName: 'bronze',
-      encryptionKey: dataEncryptionKey.key,
-      tables: BRONZE_TABLES,
-      env: { account: props.accountId, region: props.awsRegion },
-    });
-
-    // ---------------------------------------------------------------
-    // Gold namespace - single authoritative golden copy
-    // ---------------------------------------------------------------
-    // new TableNamespaceStack(this, 'S3TablesGoldNamespace', {
-    //   tableBucket: erzlager.tableBucket,
-    //   namespaceName: 'gold',
-    //   encryptionKey: dataEncryptionKey.key,
-    //   tables: GOLD_TABLES,
-    //   env: { account: props.accountId, region: props.awsRegion },
-    // });
-
-    // TODO: Eventually add ServiceEncryptionKey which not encrypt data related to services.
-    // Currently not done to reduce complexity & KMS cost
-
-    // foerderturm Dagster orchestrator. desiredCount=0 keeps dev/staging off by default.
-    const foerderturmConfig = {
-      [devAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-dev' },
-      [stageAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-stage' },
-      [prodAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-prod' }, // TODO: Set desiredCount to 1 when production is fully running
-    }[props.accountId];
-
-    if (foerderturmConfig) {
-      // TODO: (foerderturm 2.0): Remove this prod pin once 2.0 is validated on dev.
-      const foerderturmImage = (artifactName: string): ContainerArtifact => {
-        const artifact = getImageArtifact('foerderturm', artifactName);
-        if (props.accountId !== prodAccount) return artifact;
-        const pinnedVersion = '0.1.5';
-        return {
-          ...artifact,
-          imageTag: `foerderturm-${artifactName}-${pinnedVersion}`,
-          version: pinnedVersion,
-        };
-      };
-
-      const foerderturm = new FoerderturmStack(this, 'Foerderturm', {
-        environment: props.environment,
-        dagsterImageArtifact: foerderturmImage('dagster'),
-        litestreamImageArtifact: foerderturmImage('litestream'),
-        tailscaleImageArtifact: foerderturmImage('tailscale'),
-        desiredCount: foerderturmConfig.desiredCount,
-        tailscaleHostname: foerderturmConfig.tailscaleHostname,
+    if (props.accountId !== prodAccount) {
+      // ---------------------------------------------------------------
+      // Shared erzlager table bucket
+      // ---------------------------------------------------------------
+      const erzlager = new TableBucketStack(this, 'S3TablesErzlager', {
+        tableBucketName: `example-erzlager-${id}`.toLowerCase(),
+        encryptionKey: dataEncryptionKey.key,
         env: { account: props.accountId, region: props.awsRegion },
       });
 
-      // Connector Lambdas (data plane).
-      const connectors: ConnectorDefinition[] = [
-        {
-          vendor: 'example',
-          imageArtifact: foerderturmImage('connector-example-lambda-container'),
-          enabledInstrumentations: ['threading'],
-        },
-      ];
+      // ---------------------------------------------------------------
+      // Bronze namespace - raw, append-only vendor data
+      // ---------------------------------------------------------------
+      const bronze = new TableNamespaceStack(this, 'S3TablesBronzeNamespace', {
+        tableBucket: erzlager.tableBucket,
+        namespaceName: 'bronze',
+        encryptionKey: dataEncryptionKey.key,
+        tables: BRONZE_TABLES,
+        env: { account: props.accountId, region: props.awsRegion },
+      });
 
-      // Sharadar ships in foerderturm 0.2.0; prod is still pinned to 0.1.5 (no Sharadar image), so
-      // only wire it where the live manifest is used. Drop this guard together with the prod pin.
-      if (props.accountId !== prodAccount) {
-        connectors.push({
-          vendor: 'sharadar',
-          imageArtifact: foerderturmImage('connector-sharadar-lambda-container'),
-          tableNamespace: bronze,
-          memoryMiB: 2048,
-          stagingBucket: foerderturm.sharadarStagingBucket,
-          enabledInstrumentations: ['threading'],
+      // ---------------------------------------------------------------
+      // Gold namespace - single authoritative golden copy
+      // ---------------------------------------------------------------
+      // new TableNamespaceStack(this, 'S3TablesGoldNamespace', {
+      //   tableBucket: erzlager.tableBucket,
+      //   namespaceName: 'gold',
+      //   encryptionKey: dataEncryptionKey.key,
+      //   tables: GOLD_TABLES,
+      //   env: { account: props.accountId, region: props.awsRegion },
+      // });
+
+      // TODO: Eventually add ServiceEncryptionKey which not encrypt data related to services.
+      // Currently not done to reduce complexity & KMS cost
+
+      // foerderturm Dagster orchestrator. desiredCount=0 keeps dev/staging off by default.
+      const foerderturmConfig = {
+        [devAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-dev' },
+        [stageAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-stage' },
+      }[props.accountId];
+
+      if (foerderturmConfig) {
+        const foerderturmImage = (artifactName: string): ContainerArtifact =>
+          getImageArtifact('foerderturm', artifactName);
+
+        const foerderturm = new FoerderturmStack(this, 'Foerderturm', {
+          environment: props.environment,
+          dagsterImageArtifact: foerderturmImage('dagster'),
+          litestreamImageArtifact: foerderturmImage('litestream'),
+          tailscaleImageArtifact: foerderturmImage('tailscale'),
+          desiredCount: foerderturmConfig.desiredCount,
+          tailscaleHostname: foerderturmConfig.tailscaleHostname,
+          env: { account: props.accountId, region: props.awsRegion },
+        });
+
+        // Connector Lambdas (data plane).
+        const connectors: ConnectorDefinition[] = [
+          {
+            vendor: 'example',
+            imageArtifact: foerderturmImage('connector-example-lambda-container'),
+            enabledInstrumentations: ['threading'],
+          },
+          {
+            vendor: 'sharadar',
+            imageArtifact: foerderturmImage('connector-sharadar-lambda-container'),
+            tableNamespace: bronze,
+            memoryMiB: 2048,
+            stagingBucket: foerderturm.sharadarStagingBucket,
+            enabledInstrumentations: ['threading'],
+          },
+        ];
+
+        new FoerderturmConnectorsStack(this, 'FoerderturmConnectors', {
+          environment: props.environment,
+          connectors,
+          pipesMessagesBucket: foerderturm.pipesMessagesBucket,
+          env: { account: props.accountId, region: props.awsRegion },
         });
       }
-      new FoerderturmConnectorsStack(this, 'FoerderturmConnectors', {
-        environment: props.environment,
-        connectors,
-        pipesMessagesBucket: foerderturm.pipesMessagesBucket,
-        env: { account: props.accountId, region: props.awsRegion },
-      });
     }
   }
 }
