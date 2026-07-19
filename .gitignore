@@ -9,9 +9,6 @@ node_modules
 .cdk.staging
 cdk.out
 
-# Version manifest cache (generated from SSM, not committed)
-version-manifest.json
-
 # Python
 __pycache__/
 *.py[cod]

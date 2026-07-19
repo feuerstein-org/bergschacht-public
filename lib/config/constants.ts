@@ -17,9 +17,6 @@ export const pagerDutyEmail =
 export const githubOrg = process.env.GITHUB_ORG || 'feuerstein-org';
 export const githubRepo = process.env.GITHUB_REPO || 'bergschacht';
 
-/** SSM parameter prefix used for version manifest storage (without leading slash). */
-export const ssmPrefix = githubRepo;
-
 /**
  * Naming convention for foerderturm connector Lambdas. Connectors live in their own
  * (data-plane) stack, but the orchestrator invokes them by name via Dagster Pipes

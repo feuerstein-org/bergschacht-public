@@ -40,11 +40,6 @@ export interface ApplicationRepoGitHubActionsProps {
    * ARN of the KMS key used to encrypt ECR images and S3 objects.
    */
   readonly deploymentResourcesKmsKeyArn: string;
-
-  /**
-   * SSM parameter prefix for version manifest data (without leading slash).
-   */
-  readonly ssmPrefix: string;
 }
 
 /**
@@ -65,7 +60,6 @@ export function createApplicationRepoGitHubActions(
     ecrRepository,
     lambdaArtifactsBucket,
     deploymentResourcesKmsKeyArn,
-    ssmPrefix,
   } = props;
 
   // Construct a PascalCase stack id from the repo name
@@ -130,15 +124,6 @@ export function createApplicationRepoGitHubActions(
         effect: iam.Effect.ALLOW,
         actions: ['kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey*'],
         resources: [deploymentResourcesKmsKeyArn],
-      }),
-      // SSM - read and write version manifest parameters scoped to the app's own prefix
-      new iam.PolicyStatement({
-        sid: 'AllowSsmVersionManifest',
-        effect: iam.Effect.ALLOW,
-        actions: ['ssm:GetParameter', 'ssm:GetParametersByPath', 'ssm:PutParameter'],
-        resources: [
-          `arn:aws:ssm:${awsRegion}:${cicdAccountId}:parameter/${ssmPrefix}/${appRepo.repo}/*`,
-        ],
       }),
     ],
     env: { account: cicdAccountId, region: awsRegion },

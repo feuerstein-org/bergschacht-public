@@ -36,7 +36,6 @@ describe('createApplicationRepoGitHubActions', () => {
       ecrRepository: repository,
       lambdaArtifactsBucket: bucket,
       deploymentResourcesKmsKeyArn: TEST_KMS_KEY_ARN,
-      ssmPrefix: 'bergschacht',
     });
 
     template = Template.fromStack(stack);
@@ -151,7 +150,6 @@ describe('createApplicationRepoGitHubActions', () => {
       ecrRepository: new ecr.Repository(shared, 'Repo', { repositoryName: 'feuerstein' }),
       lambdaArtifactsBucket: new s3.Bucket(shared, 'Bucket', { bucketName: 'artifacts' }),
       deploymentResourcesKmsKeyArn: TEST_KMS_KEY_ARN,
-      ssmPrefix: 'bergschacht',
     });
 
     expect(stack.stackName).toContain('MyAppGitHubActions');

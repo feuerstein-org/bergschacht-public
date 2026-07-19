@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Version Manifest Schema",
+  "description": "Schema for the committed version manifest. Each artifact entry tracks the newest published version (`latest`), which is what deploys unless a `pinned` block is present - then `pinned` deploys instead and automated updates only advance `latest`.",
+  "type": "object",
+  "required": ["schemaVersion", "repositories"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the manifest schema"
+    },
+    "repositories": {
+      "type": "object",
+      "description": "Map of repository names to their artifact entries",
+      "patternProperties": {
+        "^[a-zA-Z0-9-_]+$": {
+          "type": "object",
+          "description": "Repository with one or more named artifacts",
+          "required": ["source"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Source repository (owner/repo) that produces these artifacts"
+            },
+            "images": {
+              "type": "object",
+              "description": "Map of named container image entries",
+              "patternProperties": {
+                "^[a-zA-Z0-9-_]+$": {
+                  "$ref": "#/$defs/containerEntry"
+                }
+              },
+              "additionalProperties": false
+            },
+            "lambdas": {
+              "type": "object",
+              "description": "Map of named Lambda entries",
+              "patternProperties": {
+                "^[a-zA-Z0-9-_]+$": {
+                  "$ref": "#/$defs/lambdaEntry"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "containerEntry": {
+      "type": "object",
+      "required": ["latest"],
+      "properties": {
+        "latest": { "$ref": "#/$defs/containerArtifact" },
+        "pinned": { "$ref": "#/$defs/containerArtifact" },
+        "pinReason": {
+          "type": "string",
+          "description": "Why this artifact is pinned - for the future reader wondering why it is not on latest"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lambdaEntry": {
+      "type": "object",
+      "required": ["latest"],
+      "properties": {
+        "latest": { "$ref": "#/$defs/lambdaArtifact" },
+        "pinned": { "$ref": "#/$defs/lambdaArtifact" },
+        "pinReason": {
+          "type": "string",
+          "description": "Why this artifact is pinned - for the future reader wondering why it is not on latest"
+        }
+      },
+      "additionalProperties": false
+    },
+    "containerArtifact": {
+      "type": "object",
+      "required": ["repository", "imageTag", "version", "commitSha"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Full ECR repository URI"
+        },
+        "imageTag": {
+          "type": "string",
+          "description": "Docker image tag"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semantic version of the artifact"
+        },
+        "commitSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,40}$",
+          "description": "Git commit SHA that produced this artifact"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lambdaArtifact": {
+      "type": "object",
+      "required": ["bucket", "key", "objectVersion", "version", "commitSha"],
+      "properties": {
+        "bucket": {
+          "type": "string",
+          "description": "S3 bucket containing the Lambda artifact"
+        },
+        "key": {
+          "type": "string",
+          "description": "S3 object key (path to zip file)"
+        },
+        "objectVersion": {
+          "type": "string",
+          "description": "S3 object version ID"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semantic version of the artifact"
+        },
+        "commitSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,40}$",
+          "description": "Git commit SHA that produced this artifact"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

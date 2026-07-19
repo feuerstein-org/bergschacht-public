@@ -26,13 +26,13 @@ const secondSchema: IcebergSchemaDefinition = {
   ],
 };
 
-const testArtifactValue = JSON.stringify({
+const testArtifact = {
   bucket: 'example-lambda-artifacts',
   key: 'bergschacht-custom-resources/lambdas/s3tables-table-manager/v0.1.0.zip',
   objectVersion: 'abc123',
   version: '0.1.0',
   commitSha: 'deadbeef',
-});
+};
 
 /**
  * Creates a TableNamespaceStack with the given table definitions for testing.
@@ -40,12 +40,17 @@ const testArtifactValue = JSON.stringify({
  * @returns Object containing the stack and its template
  */
 function createStack(tables: TableDefinition[]) {
-  _loadManifestFromData([
-    {
-      Name: '/bergschacht/bergschacht-custom-resources/lambdas/s3tables-table-manager',
-      Value: testArtifactValue,
+  _loadManifestFromData({
+    schemaVersion: '1.0.0',
+    repositories: {
+      'bergschacht-custom-resources': {
+        source: 'feuerstein-org/bergschacht-custom-resources',
+        lambdas: {
+          's3tables-table-manager': { latest: testArtifact },
+        },
+      },
     },
-  ]);
+  });
   const app = new cdk.App();
   const kmsStack = new cdk.Stack(app, 'DataKey');
   const key = new kms.Key(kmsStack, 'Key');

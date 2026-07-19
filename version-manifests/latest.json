@@ -1,0 +1,156 @@
+{
+  "$schema": "./version-manifest.schema.json",
+  "repositories": {
+    "bergschacht-custom-resources": {
+      "lambdas": {
+        "s3tables-table-manager": {
+          "latest": {
+            "bucket": "example-lambda-artifacts",
+            "commitSha": "77815c21308a5d35348dd7b7401c36fd794c2034",
+            "key": "bergschacht-custom-resources/s3tables-table-manager-0.3.0.zip",
+            "objectVersion": "EXAMPLE_OBJECT_VERSION",
+            "version": "0.3.0"
+          }
+        }
+      },
+      "source": "feuerstein-org/bergschacht-custom-resources"
+    },
+    "foerderturm": {
+      "images": {
+        "connector-example-ecs-container": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-connector-example-ecs-container-0.3.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.3.0"
+          }
+        },
+        "connector-example-lambda-container": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-connector-example-lambda-container-0.3.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.3.0"
+          }
+        },
+        "connector-massive-ecs-container": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-connector-massive-ecs-container-0.3.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.3.0"
+          }
+        },
+        "connector-massive-lambda-container": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-connector-massive-lambda-container-0.3.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.3.0"
+          }
+        },
+        "connector-sharadar-lambda-container": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-connector-sharadar-lambda-container-0.2.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.2.0"
+          }
+        },
+        "dagster": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-dagster-0.6.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.6.0"
+          }
+        },
+        "litestream": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-litestream-0.6.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.6.0"
+          }
+        },
+        "tailscale": {
+          "latest": {
+            "commitSha": "41783dd3a7e1f1d581ed858e4216eb97d73f73ab",
+            "imageTag": "foerderturm-tailscale-0.6.0",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.6.0"
+          }
+        }
+      },
+      "lambdas": {
+        "connector-example": {
+          "latest": {
+            "bucket": "example-lambda-artifacts",
+            "commitSha": "e268c1d3683a908737414ee537f91c293b8ddaf3",
+            "key": "foerderturm/connector-example-0.1.0.zip",
+            "objectVersion": "EXAMPLE_OBJECT_VERSION",
+            "version": "0.1.0"
+          }
+        }
+      },
+      "source": "feuerstein-org/foerderturm"
+    },
+    "sample-python-monorepo": {
+      "images": {
+        "etl-orders": {
+          "latest": {
+            "commitSha": "0f50acff1cb1279d9d625c56cb6b1e46069223b2",
+            "imageTag": "sample-python-monorepo-etl-orders-0.1.2",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.1.2"
+          }
+        },
+        "etl-users": {
+          "latest": {
+            "commitSha": "4456b6208d0871cb579f4607ea81220da8861c15",
+            "imageTag": "sample-python-monorepo-etl-users-0.1.1",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.1.1"
+          }
+        }
+      },
+      "lambdas": {
+        "etl-orders": {
+          "latest": {
+            "bucket": "example-lambda-artifacts",
+            "commitSha": "0f50acff1cb1279d9d625c56cb6b1e46069223b2",
+            "key": "sample-python-monorepo/etl-orders-0.1.2.zip",
+            "objectVersion": "EXAMPLE_OBJECT_VERSION",
+            "version": "0.1.2"
+          }
+        }
+      },
+      "source": "feuerstein-org/sample-python-monorepo"
+    },
+    "sample-python-repo": {
+      "images": {
+        "sample-etl-pipeline": {
+          "latest": {
+            "commitSha": "fa3f6e1d736fa9fd379745e42598d821013b24ae",
+            "imageTag": "sample-python-repo-sample-etl-pipeline-0.1.1",
+            "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "version": "0.1.1"
+          }
+        }
+      },
+      "lambdas": {
+        "sample-etl-pipeline": {
+          "latest": {
+            "bucket": "example-lambda-artifacts",
+            "commitSha": "fa3f6e1d736fa9fd379745e42598d821013b24ae",
+            "key": "sample-python-repo/sample-etl-pipeline-0.1.1.zip",
+            "objectVersion": "EXAMPLE_OBJECT_VERSION",
+            "version": "0.1.1"
+          }
+        }
+      },
+      "source": "feuerstein-org/sample-python-repo"
+    }
+  },
+  "schemaVersion": "1.0.0"
+}

@@ -1,13 +1,11 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as pipelines from 'aws-cdk-lib/pipelines';
 import * as codepipeline from 'aws-cdk-lib/aws-codepipeline';
-import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { NagSuppressions } from 'cdk-nag';
 import { EnvironmentStage } from './environment-stage';
-import { ssmPrefix } from '../config/constants';
 
 export interface DevelopmentPipelineStackProps extends cdk.StackProps {
   /**
@@ -109,19 +107,9 @@ export class DevelopmentPipelineStack extends cdk.Stack {
           'npm install -g pnpm',
           'pnpm install --frozen-lockfile',
           'pnpm run build',
-          `aws ssm get-parameters-by-path --path /${ssmPrefix} --recursive --query "Parameters[*].{Name:Name,Value:Value}" --output json > version-manifest.json`,
           'pnpx cdk synth',
         ],
         primaryOutputDirectory: 'cdk.out',
-        rolePolicyStatements: [
-          new iam.PolicyStatement({
-            actions: ['ssm:GetParametersByPath'],
-            resources: [
-              `arn:aws:ssm:${props.awsRegion}:${this.account}:parameter/${ssmPrefix}/*`,
-              `arn:aws:ssm:${props.awsRegion}:${this.account}:parameter/${ssmPrefix}`,
-            ],
-          }),
-        ],
       }),
       dockerEnabledForSynth: false,
       selfMutation: true,

@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as cdk from 'aws-cdk-lib/core';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -7,95 +8,110 @@ import {
   getImageArtifact,
   getContainerImage,
   getLambdaDockerImageCode,
-  SSM_PREFIX,
+  VERSION_MANIFEST_PATH,
+  type VersionManifest,
   _resetManifestCache,
   _loadManifestFromData,
 } from '../../lib/config/version-manifest';
 
 /**
- * Manifest file contents used across tests.
- * Mirrors the format produced by:
- *   aws ssm get-parameters-by-path --query "Parameters[*].{Name:Name,Value:Value}"
+ * Manifest contents used across tests. Mirrors version-manifests/latest.json.
  */
-const MANIFEST_ENTRIES: { Name: string; Value: string }[] = [
-  // order-processor - lambda only
-  {
-    Name: `${SSM_PREFIX}/order-processor/lambdas/order-processor`,
-    Value: JSON.stringify({
-      bucket: 'my-artifacts-bucket',
-      key: 'lambdas/order-processor/v1.2.3.zip',
-      objectVersion: 'abc123VersionId',
-      version: '1.2.3',
-      commitSha: 'abc1234',
-    }),
-  },
+const MANIFEST: VersionManifest = {
+  schemaVersion: '1.0.0',
+  repositories: {
+    // order-processor - lambda only
+    'order-processor': {
+      source: 'feuerstein-org/order-processor',
+      lambdas: {
+        'order-processor': {
+          latest: {
+            bucket: 'my-artifacts-bucket',
+            key: 'lambdas/order-processor/v1.2.3.zip',
+            objectVersion: 'abc123VersionId',
+            version: '1.2.3',
+            commitSha: 'abc1234',
+          },
+        },
+      },
+    },
 
-  // payment-service - image only
-  {
-    Name: `${SSM_PREFIX}/payment-service/images/payment-service`,
-    Value: JSON.stringify({
-      repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/payment-service',
-      imageTag: 'v2.0.1',
-      version: '2.0.1',
-      commitSha: '789abcd',
-    }),
-  },
+    // payment-service - image only
+    'payment-service': {
+      source: 'feuerstein-org/payment-service',
+      images: {
+        'payment-service': {
+          latest: {
+            repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/payment-service',
+            imageTag: 'v2.0.1',
+            version: '2.0.1',
+            commitSha: '789abcd',
+          },
+        },
+      },
+    },
 
-  // dual-deploy-service - both lambda and image
-  {
-    Name: `${SSM_PREFIX}/dual-deploy-service/lambdas/dual-deploy-service`,
-    Value: JSON.stringify({
-      bucket: 'my-artifacts-bucket',
-      key: 'lambdas/dual-deploy-service/v1.0.0.zip',
-      objectVersion: 'deadbeefVersionId',
-      version: '1.0.0',
-      commitSha: 'deadbeef',
-    }),
-  },
-  {
-    Name: `${SSM_PREFIX}/dual-deploy-service/images/dual-deploy-service`,
-    Value: JSON.stringify({
-      repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/dual-deploy-service',
-      imageTag: 'v1.0.0',
-      version: '1.0.0',
-      commitSha: 'deadbeef',
-    }),
-  },
+    // pinned-service - pinned at 1.0.0 while 2.0.0 is the latest published
+    'pinned-service': {
+      source: 'feuerstein-org/pinned-service',
+      images: {
+        api: {
+          latest: {
+            repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/pinned-service',
+            imageTag: 'api-2.0.0',
+            version: '2.0.0',
+            commitSha: 'bbbb222',
+          },
+          pinned: {
+            repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/pinned-service',
+            imageTag: 'api-1.0.0',
+            version: '1.0.0',
+            commitSha: 'aaaa111',
+          },
+          pinReason: '2.0.0 breaks the frobnicator, see incident 42',
+        },
+      },
+    },
 
-  // multi-artifact-service - multiple images + one lambda
-  {
-    Name: `${SSM_PREFIX}/multi-artifact-service/images/worker`,
-    Value: JSON.stringify({
-      repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/multi-artifact-service',
-      imageTag: 'worker-1.0.0',
-      version: '1.0.0',
-      commitSha: 'cafe1234',
-    }),
+    // multi-artifact-service - multiple images + one lambda
+    'multi-artifact-service': {
+      source: 'feuerstein-org/multi-artifact-service',
+      images: {
+        worker: {
+          latest: {
+            repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/multi-artifact-service',
+            imageTag: 'worker-1.0.0',
+            version: '1.0.0',
+            commitSha: 'cafe1234',
+          },
+        },
+        api: {
+          latest: {
+            repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/multi-artifact-service',
+            imageTag: 'api-1.0.0',
+            version: '1.0.0',
+            commitSha: 'cafe1234',
+          },
+        },
+      },
+      lambdas: {
+        webhook: {
+          latest: {
+            bucket: 'my-artifacts-bucket',
+            key: 'lambdas/multi-artifact-service/webhook-1.0.0.zip',
+            objectVersion: 'cafe1234VersionId',
+            version: '1.0.0',
+            commitSha: 'cafe1234',
+          },
+        },
+      },
+    },
   },
-  {
-    Name: `${SSM_PREFIX}/multi-artifact-service/images/api`,
-    Value: JSON.stringify({
-      repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/multi-artifact-service',
-      imageTag: 'api-1.0.0',
-      version: '1.0.0',
-      commitSha: 'cafe1234',
-    }),
-  },
-  {
-    Name: `${SSM_PREFIX}/multi-artifact-service/lambdas/webhook`,
-    Value: JSON.stringify({
-      bucket: 'my-artifacts-bucket',
-      key: 'lambdas/multi-artifact-service/webhook-1.0.0.zip',
-      objectVersion: 'cafe1234VersionId',
-      version: '1.0.0',
-      commitSha: 'cafe1234',
-    }),
-  },
-];
+};
 
 beforeEach(() => {
   _resetManifestCache();
-  _loadManifestFromData(MANIFEST_ENTRIES);
+  _loadManifestFromData(MANIFEST);
 });
 
 afterEach(() => {
@@ -140,16 +156,13 @@ describe('getImageArtifact', () => {
   });
 });
 
-describe('dual deployment repositories', () => {
-  test('can get both lambda and image configs from same repo', () => {
-    const lambdaConfig = getLambdaArtifact('dual-deploy-service', 'dual-deploy-service');
-    const imageConfig = getImageArtifact('dual-deploy-service', 'dual-deploy-service');
+describe('pinned entries', () => {
+  test('resolves the pinned block, not the newer latest', () => {
+    const config = getImageArtifact('pinned-service', 'api');
 
-    expect(lambdaConfig.bucket).toBe('my-artifacts-bucket');
-    expect(lambdaConfig.version).toBe('1.0.0');
-
-    expect(imageConfig.repository).toContain('ecr');
-    expect(imageConfig.version).toBe('1.0.0');
+    expect(config.version).toBe('1.0.0');
+    expect(config.imageTag).toBe('api-1.0.0');
+    expect(config.commitSha).toBe('aaaa111');
   });
 });
 
@@ -255,10 +268,32 @@ describe('getLambdaDockerImageCode', () => {
   });
 });
 
+describe('committed manifest file', () => {
+  test('loads from disk and every entry has a latest artifact', () => {
+    const manifest = JSON.parse(fs.readFileSync(VERSION_MANIFEST_PATH, 'utf-8')) as VersionManifest;
+
+    expect(manifest.schemaVersion).toBe('1.0.0');
+    const repos = Object.entries(manifest.repositories);
+    expect(repos.length).toBeGreaterThan(0);
+
+    for (const [repoName, repo] of repos) {
+      expect(repo.source).toBe(`feuerstein-org/${repoName}`);
+      const entries = [...Object.values(repo.images ?? {}), ...Object.values(repo.lambdas ?? {})];
+      expect(entries.length).toBeGreaterThan(0);
+      for (const entry of entries) {
+        expect(entry.latest.version).toMatch(/^\d+\.\d+\.\d+$/);
+        if (entry.pinned) {
+          expect(entry.pinned.version).toMatch(/^\d+\.\d+\.\d+$/);
+        }
+      }
+    }
+  });
+});
+
 describe('error handling', () => {
-  test('throws when artifact parameter is not in the manifest', () => {
+  test('throws when artifact is not in the manifest', () => {
     expect(() => getLambdaArtifact('nonexistent-repo', 'nonexistent')).toThrow(
-      /not found in.*version-manifest\.json/
+      /nonexistent-repo\/lambdas\/nonexistent.*not found/
     );
   });
 });

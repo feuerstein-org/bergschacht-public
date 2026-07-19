@@ -1,6 +1,6 @@
 # Bergschacht
 
-CDK infrastructure for Feuerstein. Application packages live in separate repositories and deploy their artifacts (Docker images, Lambda packages) to AWS. After deployment, they update the version manifest in SSM Parameter Store and trigger the CDK production pipeline directly. This documentation describes how the application code is deployed as well.
+CDK infrastructure for Feuerstein. Application packages live in separate repositories and deploy their artifacts (Docker images, Lambda packages) to AWS. After deployment, they commit an update to the version manifest (`version-manifests/latest.json`) in this repo, which triggers the CDK production pipeline. A git commit of this repo therefore fully determines the deployed artifact set - pinning and rollback are plain git operations. This documentation describes how the application code is deployed as well.
 
 ## Architecture
 
@@ -11,35 +11,26 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
 └───────────┬─────────────┘     └───────────┬─────────────┘
             │                               │
             │ 1. Deploy Docker/Lambda       │
-            │ 2. Update SSM Parameter Store │
-            │ 3. Dispatch CDK deploy.yml    │
+            │ 2. Commit manifest update     │
+            │    (GitHub App, contents API) │
             │                               │
             ▼                               ▼
 ┌─────────────────────────────────────────────────────────┐
-│               AWS SSM Parameter Store (CICD account)    │
-│      /{ssmPrefix}/{repo}/images/{name} -> {JSON}        │
-│      /{ssmPrefix}/{repo}/lambdas/{name} -> {JSON}       │
-└──────────────────────────┬──────────────────────────────┘
-                           │ Dumped to version-manifest.json
-                           │ before cdk synth
-                           ▼
-┌─────────────────────────────────────────────────────────┐
 │                  Bergschacht (CDK Repo)                 │
 │                                                         │
-│  version-manifest.json  (local cache, not committed)    │
+│  version-manifests/latest.json  (committed)             │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ [{Name: /bergschacht/repo/lambdas/name,          │   │
-│  │   Value: {"bucket","key","objectVersion",...}},  │   │
-│  │  ...]                                            │   │
+│  │ repositories.{repo}.lambdas.{name} = {           │   │
+│  │   latest: {...}, pinned?: {...} }                │   │
+│  │ repositories.{repo}.images.{name}  = { ... }     │   │
 │  └──────────────────────────────────────────────────┘   │
 │                           │ getLambdaArtifact()         │
 │                           │ / getImageArtifact()        │
 │                           ▼                             │
-│  deploy.yml                                             │
+│  deploy.yml  (triggered by the manifest commit)         │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ 1. Dump SSM -> version-manifest.json             │   │
-│  │ 2. Synth CDK & compare template checksums        │   │
-│  │ 3. Trigger only changed pipelines                │   │
+│  │ 1. Synth CDK & compare template checksums        │   │
+│  │ 2. Trigger only changed pipelines                │   │
 │  │   ┌───────────────────┐  ┌─────────────────────┐ │   │
 │  │   │  Infrastructure   │  │   Production        │ │   │
 │  │   │  Pipeline         │  │   Pipeline          │ │   │
@@ -73,6 +64,9 @@ bergschacht/
 │       ├── cicd-stage.ts         # Shared infra (KMS, ECR, OIDC, logging, cross-account)
 │       └── environment-stage.ts  # App workloads (ECS, Lambda) parameterized by account
 ├── test/                     # Infrastructure tests
+├── version-manifests/        # Committed version manifest
+│   ├── latest.json           # Deployed artifact versions (source of truth)
+│   └── version-manifest.schema.json
 └── .github/
     └── workflows/
         ├── test.yml              # PR testing workflow
@@ -106,10 +100,11 @@ mise run pre-commit         # Run pre-commit (formatting/linting)
 mise run build              # Build CDK
 mise run test               # Build & run tests
 mise run test-full          # Build, test, pre-commit & synth
-mise run refresh-manifest   # Dump SSM -> version-manifest.json (requires CICD account credentials)
 mise run synth              # Build & synthesize stacks
 mise run diff               # Show diff for stacks
 mise run deploy             # Deploy to AWS
+mise run pin -- <repo> <images|lambdas> <name> <reason>  # Pin an artifact at its current version
+mise run unpin -- <repo> <images|lambdas> <name>         # Drop the pin; latest deploys again
 
 # Or use pnpm directly
 pnpm run build
@@ -123,9 +118,7 @@ To see all available `mise` tasks run `mise run`.
 
 > Note:
 > `cdk diff` and `cdk deploy` require permissions to the account. You need at least ReadOnly permissions for `diff` and deployment permissions for `deploy`.
->
-> `mise run synth` and any other command that reads artifact versions requires `version-manifest.json` to exist.
-> Run `mise run refresh-manifest` once (with CICD account credentials) before synthsing locally.
+> Synth needs no AWS credentials for artifact versions - they come from the committed `version-manifests/latest.json`.
 
 ### Adding a New Application Repository
 
@@ -134,10 +127,10 @@ To see all available `mise` tasks run `mise run`.
 3. Get the App ID and generate the private key for your repo [here](https://github.com/organizations/feuerstein-org/settings/apps/version-manifest)
 4. Configure remaining GitHub environment variables/secrets in the `prod` environment:
 
-| Secret                     | Description                                        |
-| -------------------------- | -------------------------------------------------- |
-| `CDK_REPO_APP_ID`          | GitHub App ID for triggering workflows in CDK repo |
-| `CDK_REPO_APP_PRIVATE_KEY` | GitHub App private key for authentication          |
+| Secret                     | Description                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| `CDK_REPO_APP_ID`          | GitHub App ID for committing manifest updates to the CDK repo (needs `contents: write`) |
+| `CDK_REPO_APP_PRIVATE_KEY` | GitHub App private key for authentication                                               |
 
 | Variable                | Description                        |
 | ----------------------- | ---------------------------------- |
@@ -269,62 +262,90 @@ For non-workspace repos (single `pyproject.toml` at root), everything works the 
 
 ### Version Management
 
-Application artifact versions are stored in **AWS SSM Parameter Store** in the CICD account. Each artifact is a single JSON-valued parameter for atomic reads and writes:
+Application artifact versions are tracked in **`version-manifests/latest.json`**, committed to this repo. The manifest is validated against `version-manifests/version-manifest.schema.json` by pre-commit. Because the manifest is part of the repo, **a git commit fully determines the deployed artifact set**: the pipelines synth from their source checkout with no live lookups, so the same commit always produces the same templates, and the git history of the manifest is the history of version sets.
 
-- `/{ssmPrefix}/{repoName}/lambdas/{artifactName}` -> `{"bucket","key","objectVersion","version","commitSha"}`
-- `/{ssmPrefix}/{repoName}/images/{artifactName}` -> `{"repository","imageTag","version","commitSha"}`
+Each artifact entry holds:
 
-The `ssmPrefix` is defined in `lib/config/constants.ts` and defaults to the CDK repo name (`bergschacht`).
+- **`latest`** - the newest published artifact; always advanced (only forward) when an app repo deploys. This is what CDK synth resolves - unless:
+- **`pinned`** (optional) - a full artifact block that deploys _instead of_ `latest` while present. Automated updates never touch it; publishes keep advancing `latest` underneath.
+- **`pinReason`** (optional) - why the pin exists, for the future reader wondering why the artifact is not on `latest`.
 
-To avoid fetching SSM parameters in the CICD account from Dev/Staging/Prod accounts or replicating the SSM params to all accounts - **a local cache file is written before `cdk synth` runs**:
-
-This file (`version-manifest.json`) is git-ignored and generated:
-
-- **In CI/CD pipelines** - automatically by the synth step (which runs in the CICD account)
-- **Locally** - by running `mise run refresh-manifest` (requires CICD account credentials)
+> Note: In the future the version manifest will live in a separate repo or a separate Service that manages versions, review [Seilbahn](https://github.com/feuerstein-org/seilbahn) for reasoning. But mainly, security concerns, requirement for multiple version manifests in the future etc.
 
 ### How it works
 
 1. **Application repos** build and push Docker images / Lambda packages to AWS
-2. They write artifact metadata to SSM Parameter Store (one JSON parameter per artifact), but only if the version is newer than the existing one
-3. They dispatch the CDK repo's `deploy.yml` workflow with `pipeline: prod` via a GitHub App token
-4. The CDK repo's `deploy.yml` dumps all SSM parameters to `version-manifest.json`, then runs `cdk synth`, and triggers the **Production Pipeline**
-5. The Production Pipeline's own synth step (running in the CICD account) also dumps SSM before calling `cdk synth`, so the deployed templates always use the latest artifact versions
+2. Their deploy workflow (seilbahn's `update-version-manifest` action) commits the new artifact metadata to `version-manifests/latest.json` in this repo via the GitHub App (contents API with conflict retry). `latest` is advanced when the version is newer; a `pinned` block, if present, is never touched
+3. The manifest commit lands on `master` and triggers `deploy.yml` (the `version-manifests/**` push path), which runs synth-based change detection and triggers the **Production Pipeline** when application templates changed
+4. The Production Pipeline snapshots this repo at one commit for the whole execution, so Staging and Prod deploy the exact same artifact set, and the manual Prod approval approves exactly what Staging tested
 
 For infrastructure changes pushed to `master`, `deploy.yml` runs `cdk synth`, compares template checksums against cached values, and only triggers the **Infrastructure Pipeline** and/or **Production Pipeline** if their templates actually changed.
 
-> If an artifact was deleted from AWS you can redeploy it simply by rerunning an old workflow inside the application repo to redeploy the artifact for said version.
+> If an artifact was deleted from AWS you can redeploy it simply by rerunning an old workflow inside the application repo to redeploy the artifact for said version (rebuild-only redeploy - it does not move the manifest).
+
+### Pinning
+
+To freeze an artifact while its source repo keeps releasing:
+
+```bash
+mise run pin -- foerderturm images dagster "0.7.0 breaks X, see #123"
+# copies `latest` into a `pinned` block (which deploys instead) and records the reason.
+# To pin an *older* version, edit the pinned block manually - copy it from git history.
+git commit && git push   # the push triggers the deploy
+```
+
+While pinned, app repo deploys keep advancing `latest` (so the newest published version stays visible in the manifest) but never touch `pinned`. To release the pin:
+
+```bash
+mise run unpin -- foerderturm images dagster # removes the pinned block; latest deploys again
+```
 
 ### Rollback
 
-- **Specific artifact**: Update the SSM parameter to the previous version's JSON, then re-trigger the Production Pipeline.
+- **Specific artifact**: copy the artifact block of the desired version from the manifest's git history (`git log -p version-manifests/latest.json`) into the entry's `pinned` field with a `pinReason`. Commit and push. The pin keeps the next app deploy from overwriting the rollback.
+- **Whole version set**: `git revert` the manifest commit(s), or restore the file from an earlier commit. Note the pipeline deploys `master` HEAD - infra code changes merged since are deployed along with the reverted manifest.
 - **CDK stage**: Revert to a specific execution ID in CodePipeline or revert to a previous commit in this repo.
 - **Manual re-trigger**: Use `workflow_dispatch` on `deploy.yml` to select `infra`, `prod`, or `all` to force-trigger specific pipelines.
 
-### SSM Parameter Structure
-
-Each artifact is stored as a single JSON-valued SSM parameter. This ensures atomic updates (no partial writes) and fewer API calls.
-
-**Lambda artifact** (`/{ssmPrefix}/{repo}/lambdas/{artifactName}`):
+### Manifest Structure
 
 ```json
 {
-  "bucket": "example-lambda-artifacts",
-  "key": "sample-python-repo/sample-python-repo-0.1.0.zip",
-  "objectVersion": "AbCdEf1234567890",
-  "version": "0.1.0",
-  "commitSha": "abc123..."
-}
-```
-
-**Container image artifact** (`/{ssmPrefix}/{repo}/images/{artifactName}`):
-
-```json
-{
-  "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-  "imageTag": "sample-python-repo-sample-python-repo-0.1.0",
-  "version": "0.1.0",
-  "commitSha": "abc123..."
+  "$schema": "./version-manifest.schema.json",
+  "schemaVersion": "1.0.0",
+  "repositories": {
+    "sample-python-repo": {
+      "source": "feuerstein-org/sample-python-repo",
+      "lambdas": {
+        "sample-etl-pipeline": {
+          "latest": {
+            "bucket": "example-lambda-artifacts",
+            "key": "sample-python-repo/sample-etl-pipeline-0.1.0.zip",
+            "objectVersion": "AbCdEf1234567890",
+            "version": "0.1.0",
+            "commitSha": "abc123..."
+          }
+        }
+      },
+      "images": {
+        "sample-etl-pipeline": {
+          "latest": {
+            "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "imageTag": "sample-python-repo-sample-etl-pipeline-0.2.0",
+            "version": "0.2.0",
+            "commitSha": "def456..."
+          },
+          "pinned": {
+            "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+            "imageTag": "sample-python-repo-sample-etl-pipeline-0.1.0",
+            "version": "0.1.0",
+            "commitSha": "abc123..."
+          },
+          "pinReason": "0.2.0 breaks X, see #123"
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -355,7 +376,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 
 // Get Lambda package configuration. Pass repo name and artifact name.
-// Reads from version-manifest.json
+// Reads from version-manifests/latest.json (the `pinned` block if present, else `latest`)
 const lambdaConfig = getLambdaArtifact('order-processor', 'order-processor');
 
 new lambda.Function(this, 'OrderProcessor', {
@@ -432,13 +453,13 @@ AWS authentication uses OIDC via the `aws-actions/configure-aws-credentials` act
 
 ### Production Pipeline (`ProductionPipelineStack`)
 
-- **Triggered by**: `deploy.yml` when application templates change, or via `workflow_dispatch` from application repos after an SSM version manifest update
+- **Triggered by**: `deploy.yml` when application templates change - including version manifest commits pushed by application repos
 - **AWS Pipeline Name**: `BergschachtProductionPipeline`
 - **Deployment stages**:
   1. **Staging Account** (`EnvironmentStage`) - Staging environment application workloads
   2. **Prod Account** (`EnvironmentStage`) - Production environment application workloads (requires manual approval)
 
-The pipeline's synth step dumps all SSM parameters under `/bergschacht` to `version-manifest.json` before running `cdk synth`, ensuring the deployed templates always reflect the latest artifact versions.
+The pipeline's synth step reads artifact versions from the committed `version-manifests/latest.json` of its source checkout - one commit determines the whole execution, so Staging and Prod deploy the same artifact set.
 
 > [!WARNING]
 > **Iceberg column renames + superseded pipelines.** Renaming a column on an Iceberg
@@ -541,7 +562,7 @@ This stack creates the CDK Pipeline for application deployments:
 - Creates a CodePipeline V2 pipeline (`BergschachtProductionPipeline`) with CodeConnections GitHub connection
 - Deploys `EnvironmentStage` to Staging -> Prod accounts in sequence
 - Includes manual approval step before Prod deployment
-- Triggered by GitHub Actions when application templates or version manifest SSM parameters change
+- Triggered by GitHub Actions when application templates or the committed version manifest change
 
 ### DevelopmentPipelineStack
 
@@ -608,4 +629,4 @@ Application workload stack deployed by `EnvironmentStage` into Dev, Staging, and
 - Versioned, KMS-encrypted S3 bucket for Litestream WAL replication with `RETAIN` removal policy and 30-day noncurrent-version expiration
 - Pulls the three container images (`dagster`, `litestream`, `tailscale`) from the version manifest, all published by the foerderturm repo to the shared ECR repo
 - Reads the Tailscale OAuth client secret from SSM at `/tailscale/foerderturm/oauth-client` - this is a `SecureString` and must be created out-of-band (CloudFormation cannot create SecureString parameters)
-- Service uses `minHealthyPercent=0` / `maxHealthyPercent=100` (stop-then-start) because SQLite is single-writer; `desiredCount` is configured per-environment in `environment-stage.ts` (1 in prod, 0 in dev/staging to reduce cost)
+- Service uses `minHealthyPercent=0` / `maxHealthyPercent=100` (stop-then-start) because SQLite is single-writer; `desiredCount` is configured per-environment in `environment-stage.ts` (1 in prod, 0 in dev/staging to reduce cost) But mainly, security concerns, requirement for multiple version manifests in the future etc.

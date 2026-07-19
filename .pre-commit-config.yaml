@@ -12,6 +12,15 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
+  # Version manifest schema validation
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.33.0
+    hooks:
+      - id: check-jsonschema
+        name: validate version manifest
+        files: ^version-manifests/latest\.json$
+        args: ['--schemafile', 'version-manifests/version-manifest.schema.json']
+
   # ESLint and Prettier
   - repo: local
     hooks:

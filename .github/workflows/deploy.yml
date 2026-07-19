@@ -7,6 +7,9 @@ on:
     paths:
       - 'lib/**'
       - 'bin/**'
+      # Manifest commits (pushed by app repos via seilbahn's update-version-manifest
+      # action) trigger the same synth-based change detection as code changes.
+      - 'version-manifests/**'
   workflow_dispatch:
     inputs:
       pipeline:
@@ -65,7 +68,6 @@ jobs:
       - name: Build & Synth
         run: |
           mise run build-ci
-          aws ssm get-parameters-by-path --path /bergschacht --recursive --query "Parameters[*].{Name:Name,Value:Value}" --output json > version-manifest.json
           pnpm run cdk synth --quiet 2>/dev/null || true
 
       - name: Compute template checksums

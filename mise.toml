@@ -50,7 +50,33 @@ depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to deploy (defaults to ** for all)"'
 run = 'pnpm run cdk deploy ${usage_stacks:-"**"}'
 
-[tasks.refresh-manifest]
-description = "Dump SSM version manifest from CICD account to version-manifest.json"
-env = {AWS_PROFILE = 'cicd', AWS_REGION = 'us-east-1'}
-run = 'aws ssm get-parameters-by-path --path /bergschacht --recursive --query "Parameters[*].{Name:Name,Value:Value}" --output json > version-manifest.json && echo "Wrote version-manifest.json ($(jq length version-manifest.json) parameters)"'
+[tasks.pin]
+description = "Pin an artifact at its currently deploying version; newer publishes only advance `latest`"
+usage = '''
+arg "<repo>" help="Source repo name, e.g. foerderturm"
+arg "<kind>" help="Artifact kind: images or lambdas"
+arg "<name>" help="Artifact name, e.g. dagster"
+arg "<reason>" help="Why the artifact is pinned (stored as pinReason)"
+'''
+run = '''
+jq --sort-keys --arg r "$usage_repo" --arg k "$usage_kind" --arg n "$usage_name" --arg why "$usage_reason" \
+  'if .repositories[$r][$k][$n] then .repositories[$r][$k][$n] |= (.pinned = (.pinned // .latest) | .pinReason = $why) else error("no entry \($r)/\($k)/\($n)") end' \
+  version-manifests/latest.json > version-manifests/latest.json.tmp \
+  && mv version-manifests/latest.json.tmp version-manifests/latest.json \
+  && echo "Pinned $usage_repo/$usage_kind/$usage_name at $(jq -r ".repositories[\"$usage_repo\"][\"$usage_kind\"][\"$usage_name\"].pinned.version" version-manifests/latest.json). To pin an older version, edit the pinned block manually (copy it from git history). Commit & push to apply."
+'''
+
+[tasks.unpin]
+description = "Unpin an artifact: the latest published version deploys again"
+usage = '''
+arg "<repo>" help="Source repo name, e.g. foerderturm"
+arg "<kind>" help="Artifact kind: images or lambdas"
+arg "<name>" help="Artifact name, e.g. dagster"
+'''
+run = '''
+jq --sort-keys --arg r "$usage_repo" --arg k "$usage_kind" --arg n "$usage_name" \
+  'if .repositories[$r][$k][$n] then .repositories[$r][$k][$n] |= del(.pinned, .pinReason) else error("no entry \($r)/\($k)/\($n)") end' \
+  version-manifests/latest.json > version-manifests/latest.json.tmp \
+  && mv version-manifests/latest.json.tmp version-manifests/latest.json \
+  && echo "Unpinned $usage_repo/$usage_kind/$usage_name -> $(jq -r ".repositories[\"$usage_repo\"][\"$usage_kind\"][\"$usage_name\"].latest.version" version-manifests/latest.json). Commit & push to apply."
+'''
