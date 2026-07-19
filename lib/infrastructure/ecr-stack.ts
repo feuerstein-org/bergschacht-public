@@ -65,8 +65,8 @@ export class EcrStack extends cdk.Stack {
       }),
       lifecycleRules: [
         {
-          description: 'Keep last 10 images',
-          maxImageCount: 10,
+          description: 'Recycle older images',
+          maxImageCount: 30,
           rulePriority: 1,
         },
       ],

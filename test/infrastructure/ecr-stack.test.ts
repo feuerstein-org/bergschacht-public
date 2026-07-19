@@ -27,7 +27,7 @@ describe('EcrStack', () => {
         ScanOnPush: true,
       },
       LifecyclePolicy: {
-        LifecyclePolicyText: Match.stringLikeRegexp('.*imageCountMoreThan.*countNumber.*10.*'),
+        LifecyclePolicyText: Match.stringLikeRegexp('.*imageCountMoreThan.*countNumber.*30.*'),
       },
     });
   });
