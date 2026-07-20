@@ -6,6 +6,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { NagSuppressions } from 'cdk-nag';
 import { EnvironmentStage } from './environment-stage';
+import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults';
 
 export interface DevelopmentPipelineStackProps extends cdk.StackProps {
   /**
@@ -111,6 +112,7 @@ export class DevelopmentPipelineStack extends cdk.Stack {
         ],
         primaryOutputDirectory: 'cdk.out',
       }),
+      codeBuildDefaults: PIPELINE_CODEBUILD_DEFAULTS,
       dockerEnabledForSynth: false,
       selfMutation: true,
     });

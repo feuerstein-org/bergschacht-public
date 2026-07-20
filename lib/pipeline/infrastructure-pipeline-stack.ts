@@ -7,6 +7,7 @@ import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { CicdStage } from './cicd-stage';
 import { ApplicationRepo } from '../config/constants';
+import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults';
 
 export interface InfrastructurePipelineStackProps extends cdk.StackProps {
   /**
@@ -125,6 +126,7 @@ export class InfrastructurePipelineStack extends cdk.Stack {
         ],
         primaryOutputDirectory: 'cdk.out',
       }),
+      codeBuildDefaults: PIPELINE_CODEBUILD_DEFAULTS,
       dockerEnabledForSynth: false,
       selfMutation: true,
     });
