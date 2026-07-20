@@ -34,3 +34,6 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .coverage
+
+# Vitest coverage output
+coverage/

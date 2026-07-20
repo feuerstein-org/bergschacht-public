@@ -19,9 +19,9 @@ description = "Build"
 run = "pnpm run build"
 
 [tasks.test]
-description = "Build & run tests on all files"
+description = "Build & run tests (with coverage) on all files"
 depends = ["build"]
-run = "pnpm run test"
+run = "pnpm run test:coverage"
 
 [tasks.test-full]
 description = "Build & run full test suite & synth all stack, pass a stack name to see the CFN"

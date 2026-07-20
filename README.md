@@ -52,7 +52,7 @@ bergschacht/
 ├── package.json              # Dependencies and scripts
 ├── tsconfig.json             # TypeScript config
 ├── cdk.json                  # CDK app config
-├── jest.config.js            # Jest test config
+├── vitest.config.ts          # Vitest test config
 ├── eslint.config.mjs         # ESLint config
 ├── mise.toml                 # Development tasks
 ├── mise.ci.toml              # CI-specific tasks
@@ -98,7 +98,7 @@ You can use `pnpm` to format, lint, build and test. Alternatively you can also u
 ```bash
 mise run pre-commit         # Run pre-commit (formatting/linting)
 mise run build              # Build CDK
-mise run test               # Build & run tests
+mise run test               # Build & run tests with coverage
 mise run test-full          # Build, test, pre-commit & synth
 mise run synth              # Build & synthesize stacks
 mise run diff               # Show diff for stacks

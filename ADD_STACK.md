@@ -10,8 +10,8 @@ Quick reference for adding a new infrastructure stack to this project.
 | `lib/pipeline/environment-stage.ts` | **EnvironmentStage** – app workload stacks deployed per environment (dev / prod). Add stacks here that change with every app deployment. |
 | `lib/pipeline/cicd-stage.ts`        | **CicdStage** – shared infra stacks (KMS, ECR, OIDC, logging). Add stacks here that are deployed once in the CI/CD account.              |
 | `lib/config/constants.ts`           | Account IDs, region, SSM prefix, application repo list                                                                                   |
-| `test/infrastructure/`              | Jest tests for infrastructure stacks                                                                                                     |
-| `test/pipeline/`                    | Jest tests for pipeline stacks                                                                                                           |
+| `test/infrastructure/`              | Vitest tests for infrastructure stacks                                                                                                   |
+| `test/pipeline/`                    | Vitest tests for pipeline stacks                                                                                                         |
 
 ## Step-by-step
 
@@ -112,7 +112,7 @@ What to test:
 
 ```bash
 pnpm run build          # compile TypeScript
-pnpm run test           # run Jest tests
+pnpm run test           # run Vitest tests
 pnpm run cdk synth      # synthesise CloudFormation templates
 ```
 
