@@ -27,7 +27,16 @@ Data flows through a three-layer medallion architecture: **Bronze -> Silver (vir
 
 Bronze tables store raw vendor data exactly as delivered - no transformations beyond adding ingestion metadata (`ingested_at`, `pipeline_run_id`) and some minimal mapping (e.g. MIC codes for exchanges). Each vendor's feed produces its own rows, so the same instrument on the same date may appear multiple times, once per vendor.
 
-Ingestion uses **change-detected append**: a `record_hash` (SHA-256 of all content columns) is compared against the latest row for the same natural key. A new row is only written when the hash differs, keeping storage bounded while preserving the full audit trail. Note that this only applies to SCD2 tables, for tables that store daily pricing for example we accept potential duplicates and filter them out either separately or they get removed in the pipeline to gold (see [Incremental ingestion & restatements](#incremental-ingestion--restatements) for how those duplicates arise and are resolved).
+Ingestion uses **change-detected append**: a `record_hash` (SHA-256 of all content columns) identifies each version of a natural key. Existing and incoming rows are merged into a single per-key timeline ordered by an **`as_of`** column, and a row is written only when its hash differs from the immediately preceding version on that timeline - keeping storage bounded while preserving the full audit trail, and letting a whole date range commit in one idempotent call. The `as_of` column takes one of two shapes:
+
+- The date the vendor claims the data was accurate (e.g. `snapshot_date`) - for a **time-travel API** that returns data for a day 10 years ago (e.g. Massive, whose `snapshot_date` is the `date` query parameter and can be backfilled). A backfilled observation must order at its historical date, so `ingested_at` would be wrong here.
+- The date when _we_ ingested this data (`ingested_at`) - for a **current-state API** that only returns today's state (e.g. Sharadar).
+
+The shape is chosen **per feed** by whether the vendor supplies a genuine historical as-of date, not by the vendor as a whole.
+
+> Note: Some feeds which might seem like a time-travel feed still can use `ingested_at`, e.g. Sharadars corporate actions - those are distinct events on specific days. Unlike for Massive tickers API where every day might have the same data (because a change in corporate structure happens very rarely) we can SCD logic on days following each other with the same data, for Sharadar corporate actions two exactly same events on 2 different days means that actually 2 events occurred - hence the date when the event occurred is part of the key (`effective_date`) and we have to rely on the date we ingested the data. In this scenario if the data changed in an event that already happened this means there was a restatement.
+
+This only applies to SCD2 tables, for tables that for example store daily pricing we accept potential duplicates and filter them out either separately or they get removed in the pipeline to gold (see [Incremental ingestion & restatements](#incremental-ingestion--restatements) for how those duplicates arise and are resolved).
 
 #### Bronze time columns
 
@@ -37,7 +46,7 @@ Bronze rows carry up to three distinct, non-redundant time signals. They sit on 
 - **`snapshot_date`** (_observation / as-of time_) - which pull cycle this row belongs to. Uniform across an entire pull and **required**; it is the column the `snapshot_month` partition is built on. It records _when we observed the universe_, which is what lets us reconstruct "the set of securities the vendor presented as of date T" - something `vendor_as_of_ts` cannot express, because an instrument absent from a snapshot is indistinguishable from one present-but-unchanged by vendor timestamp alone. Its semantics differ by vendor:
   - **Massive** sets it to the `date` **query parameter** of the All Tickers / Ticker Overview calls - a genuine point-in-time as-of date that can be historical/backfilled.
   - **Sharadar** sets it to the **ingestion run date** (a proxy), because the TICKERS export carries no as-of date of its own; the vendor's real freshness signal for Sharadar lives in `vendor_as_of_ts`.
-- **`ingested_at`** (_transaction time_) - when **our** pipeline physically wrote the row. Drives change-detection ordering (latest-version-per-key) and provenance.
+- **`ingested_at`** (_transaction time_) - when **our** pipeline physically wrote the row. Always present (`required`), unlike the nullable `vendor_as_of_ts`.
 
 Bronze tables are partitioned by `source_vendor` and a time column (e.g. `snapshot_month`, `price_month`) so vendor-scoped scans are efficient.
 

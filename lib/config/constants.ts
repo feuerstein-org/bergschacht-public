@@ -24,11 +24,26 @@ export const githubRepo = process.env.GITHUB_REPO || 'bergschacht';
  * orchestrator grant `lambda:InvokeFunction` on a prefix pattern and receive the name as a
  * plain-string env var, so connectors can be added/removed without a hard cross-stack reference.
  */
-export const connectorFunctionPrefix = 'foerderturm-connector-';
+export const connectorPrefix = 'foerderturm-connector-';
 
 /** Deterministic function name for a connector, e.g. `connectorFunctionName('example', 'dev')` */
 export const connectorFunctionName = (vendor: string, environment: string): string =>
-  `${connectorFunctionPrefix}${vendor}-${environment}`;
+  `${connectorPrefix}${vendor}-${environment}`;
+
+/** Deterministic task name for a connetor, e.g. `connectorEcsTaskFamily('example', 'dev')` */
+export const connectorEcsTaskFamily = (vendor: string, environment: string): string =>
+  `${connectorPrefix}${vendor}-ecs-${environment}`;
+export const connectorEcsTaskRoleName = (vendor: string, environment: string): string =>
+  `${connectorPrefix}${vendor}-ecs-task-${environment}`;
+export const connectorEcsExecRoleName = (vendor: string, environment: string): string =>
+  `${connectorPrefix}${vendor}-ecs-exec-${environment}`;
+
+/**
+ * Container name of the connector container inside every connector ECS task definition. The
+ * orchestrator targets it in `run_task` containerOverrides (feed/source env), so it must be
+ * identical across connectors.
+ */
+export const connectorEcsContainerName = 'connector';
 
 /**
  * Application repository configuration.

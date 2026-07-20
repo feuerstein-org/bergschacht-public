@@ -9,7 +9,11 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { ContainerArtifact, getContainerImage } from '../config/version-manifest';
-import { connectorFunctionName, connectorFunctionPrefix } from '../config/constants';
+import {
+  connectorEcsTaskFamily,
+  connectorFunctionName,
+  connectorPrefix,
+} from '../config/constants';
 
 /** Default Tailscale ACL tag the sidecar advertises. Must exist in the tailnet admin policy. */
 const DEFAULT_TAILSCALE_TAG = 'tag:foerderturm';
@@ -123,6 +127,8 @@ export interface FoerderturmStackProps extends cdk.StackProps {
 export class FoerderturmStack extends cdk.Stack {
   public readonly vpc: ec2.IVpc;
   public readonly cluster: ecs.ICluster;
+  /** Cluster for the ephemeral connector ECS tasks (backfill chunks) launched via Pipes. */
+  public readonly workersCluster: ecs.ICluster;
   public readonly service: ecs.IFargateService;
   public readonly litestreamBucket: s3.IBucket;
   public readonly pipesMessagesBucket: s3.IBucket;
@@ -133,6 +139,8 @@ export class FoerderturmStack extends cdk.Stack {
   public readonly sharadarStagingBucket: s3.IBucket;
   public readonly tailscaleSecret: ssm.IStringParameter;
   public readonly logGroup: logs.ILogGroup;
+  /** Egress-only SG the orchestrator attaches to connector ECS backfill tasks at run_task time. */
+  public readonly connectorTaskSecurityGroup: ec2.ISecurityGroup;
 
   constructor(scope: Construct, id: string, props: FoerderturmStackProps) {
     super(scope, id, props);
@@ -338,10 +346,31 @@ export class FoerderturmStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // ---- ECS cluster ----
+    // ---- ECS cluster (orchestrator) ----
+    // Hosts only the single stateful Dagster service task.
     this.cluster = new ecs.Cluster(this, 'Cluster', {
       clusterName: `foerderturm-${environment}`,
       vpc: this.vpc,
+    });
+
+    // ---- ECS cluster (workers) ----
+    // FARGATE + FARGATE_SPOT capacity providers are associated so run_task
+    // can use a capacityProviderStrategy (Spot by default).
+    const workersClusterName = `foerderturm-workers-${environment}`;
+    this.workersCluster = new ecs.Cluster(this, 'WorkersCluster', {
+      clusterName: workersClusterName,
+      vpc: this.vpc,
+      enableFargateCapacityProviders: true,
+    });
+
+    // ---- Connector task security group ----
+    // Egress-only SG for the connector ECS tasks the orchestrator launches via Dagster Pipes
+    // (vendor APIs, ECR pulls, S3, SSM, CloudWatch). Owned here because the orchestrator passes
+    // it in run_task's network configuration; the connectors stack only defines task definitions.
+    this.connectorTaskSecurityGroup = new ec2.SecurityGroup(this, 'ConnectorTaskSg', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+      description: `foerderturm-${environment}: egress-only SG for connector ECS tasks`,
     });
 
     // ---- Task definition ----
@@ -376,13 +405,22 @@ export class FoerderturmStack extends cdk.Stack {
       });
     };
 
-    // Required to trigger the respective Lambdas
+    // Required to trigger the respective Lambdas / ECS tasks
     const pipesEnv: Record<string, string> = {
       PIPES_MESSAGES_BUCKET: this.pipesMessagesBucket.bucketName,
       CONNECTOR_EXAMPLE_LAMBDA_NAME: connectorFunctionName('example', environment),
       CONNECTOR_SHARADAR_LAMBDA_NAME: connectorFunctionName('sharadar', environment),
+      CONNECTOR_MASSIVE_LAMBDA_NAME: connectorFunctionName('massive', environment),
       // Dedicated bucket, so partitions are staged at the root (`<bucket>/sep/...`, `<bucket>/tickers/...`).
       SHARADAR_STAGING_BUCKET: this.sharadarStagingBucket.bucketName,
+      // Shared launch parameters for connector ECS tasks (PipesECSClient run_task):
+      // this cluster, its public subnets (public IP for egress - no NAT), and the egress-only SG.
+      CONNECTOR_ECS_CLUSTER: workersClusterName,
+      CONNECTOR_ECS_SUBNETS: this.vpc.publicSubnets.map((subnet) => subnet.subnetId).join(','),
+      CONNECTOR_ECS_SECURITY_GROUP: this.connectorTaskSecurityGroup.securityGroupId,
+      // Task-definition family names resolve to the latest ACTIVE revision at run_task time.
+      CONNECTOR_EXAMPLE_ECS_TASK_FAMILY: connectorEcsTaskFamily('example', environment),
+      CONNECTOR_MASSIVE_ECS_TASK_FAMILY: connectorEcsTaskFamily('massive', environment),
     };
 
     // (1) Litestream restore - init container. Restores the three SQLite stores from S3 (no-op
@@ -537,13 +575,68 @@ export class FoerderturmStack extends cdk.Stack {
       new iam.PolicyStatement({
         actions: ['lambda:InvokeFunction'],
         resources: [
-          cdk.Stack.of(this).formatArn({
+          this.formatArn({
             service: 'lambda',
             resource: 'function',
-            resourceName: `${connectorFunctionPrefix}*`,
+            resourceName: `${connectorPrefix}*`,
             arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
           }),
         ],
+      })
+    );
+
+    // ---- Connector ECS tasks permissions (PipesECSClient) ----
+    // Allow running the tasks
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['ecs:RunTask'],
+        resources: [
+          this.formatArn({
+            service: 'ecs',
+            resource: 'task-definition',
+            resourceName: `${connectorPrefix}*`,
+            arnFormat: cdk.ArnFormat.SLASH_RESOURCE_NAME,
+          }),
+        ],
+        conditions: { ArnEquals: { 'ecs:cluster': this.workersCluster.clusterArn } },
+      })
+    );
+    // Poll for completion and stop on run cancellation.
+    // Allow tagging
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['ecs:DescribeTasks', 'ecs:StopTask', 'ecs:TagResource'],
+        resources: [
+          this.formatArn({
+            service: 'ecs',
+            resource: 'task',
+            resourceName: `${workersClusterName}/*`,
+            arnFormat: cdk.ArnFormat.SLASH_RESOURCE_NAME,
+          }),
+        ],
+      })
+    );
+    // PipesECSClient calls DescribeTaskDefinition before RunTask
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['ecs:DescribeTaskDefinition'],
+        resources: ['*'],
+      })
+    );
+    // Pass the connector task + execution roles (deterministic foerderturm-connector-* names).
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['iam:PassRole'],
+        resources: [
+          this.formatArn({
+            service: 'iam',
+            region: '',
+            resource: 'role',
+            resourceName: `${connectorPrefix}*`,
+            arnFormat: cdk.ArnFormat.SLASH_RESOURCE_NAME,
+          }),
+        ],
+        conditions: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
       })
     );
 
@@ -582,6 +675,10 @@ export class FoerderturmStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ClusterName', {
       value: this.cluster.clusterName,
       description: 'ECS cluster name',
+    });
+    new cdk.CfnOutput(this, 'WorkersClusterName', {
+      value: this.workersCluster.clusterName,
+      description: 'ECS cluster the connector tasks run in (PipesECSClient run_task)',
     });
     new cdk.CfnOutput(this, 'LitestreamBucketName', {
       value: this.litestreamBucket.bucketName,
@@ -663,15 +760,26 @@ export class FoerderturmStack extends cdk.Stack {
       },
     ]);
 
+    NagSuppressions.addResourceSuppressions(this.workersCluster, [
+      {
+        id: 'AwsSolutions-ECS4',
+        reason:
+          'Container Insights not needed for the ephemeral connector tasks; ' +
+          'their telemetry flows through Application Signals via the CloudWatch agent sidecar.',
+      },
+    ]);
+
     NagSuppressions.addResourceSuppressions(
       taskDef,
       [
         {
           id: 'AwsSolutions-IAM5',
           reason:
-            'ecr:GetAuthorizationToken requires resource:*; ' +
-            'lambda:InvokeFunction scoped to the foerderturm-connector-* name prefix so connectors ' +
-            'can be added/removed without re-deploying this stack; S3 read on the Pipes bucket objects path.',
+            'ecr:GetAuthorizationToken and ecs:DescribeTaskDefinition require resource:*; ' +
+            'lambda:InvokeFunction / ecs:RunTask / iam:PassRole are scoped to the ' +
+            'foerderturm-connector-* name prefix so connectors can be added/removed without ' +
+            're-deploying this stack; ecs:DescribeTasks/StopTask/TagResource are scoped to tasks ' +
+            'on this cluster; S3 read on the Pipes bucket objects path.',
         },
         {
           id: 'AwsSolutions-IAM4',

@@ -1,12 +1,25 @@
 import * as cdk from 'aws-cdk-lib/core';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { connectorFunctionName } from '../config/constants';
-import { type ContainerArtifact, getLambdaDockerImageCode } from '../config/version-manifest';
+import {
+  connectorEcsContainerName,
+  connectorEcsExecRoleName,
+  connectorEcsTaskFamily,
+  connectorEcsTaskRoleName,
+  connectorFunctionName,
+} from '../config/constants';
+import {
+  type ContainerArtifact,
+  getContainerImage,
+  getLambdaDockerImageCode,
+} from '../config/version-manifest';
 
 /**
  * All ADOT Python auto-instrumentations shipped in the pinned distro (foerderturm's connector
@@ -14,6 +27,22 @@ import { type ContainerArtifact, getLambdaDockerImageCode } from '../config/vers
  * default. To enable use {@link enabledInstrumentations}
  * @see https://github.com/aws-observability/aws-otel-python-instrumentation/blob/v0.17.1/lambda-layer/src/otel-instrument
  */
+/**
+ * ADOT Python auto-instrumentation distro injected into connector ECS tasks by an init container
+ * MUST stay on the same version as the layer the connector Dockerfiles bake (`ADOT_PYTHON_VERSION`),
+ * so the distro matches the connectors' pinned `opentelemetry-api`.
+ * @see https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Signals-ECS-Sidecar.html
+ */
+const ADOT_PYTHON_ECS_IMAGE =
+  'public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.17.1';
+
+/** CloudWatch agent sidecar receiving OTLP on :4316 and serving the X-Ray sampler on :2000. */
+const CLOUDWATCH_AGENT_IMAGE = 'public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300069.0b1529';
+
+/** Shared volume the init container copies the ADOT distro into. */
+const OTEL_PYTHON_VOLUME = 'opentelemetry-auto-instrumentation-python';
+const OTEL_PYTHON_MOUNT_PATH = '/otel-auto-instrumentation-python';
+
 // prettier-ignore
 const ADOT_PYTHON_DISABLED_INSTRUMENTATIONS: readonly string[] = [
   'aio-pika', 'aiohttp-client', 'aiohttp-server', 'aiopg', 'asgi', 'asyncio', 'asyncpg', 'boto', 'boto3', 'cassandra', 'celery', 'confluent_kafka', 'dbapi',
@@ -77,6 +106,28 @@ export interface ConnectorDefinition {
    * @default undefined - no staging-bucket read access.
    */
   readonly stagingBucket?: s3.IBucket;
+  /**
+   * SSM SecureString parameter names the connector fetches at runtime. Imported and granted read
+   * inside this stack. The connector resolves the value by name, taking the name from an env var passed via
+   * {@link environmentVars}. Used for the Massive API key.
+   * @default undefined - no SSM parameter read access.
+   */
+  readonly secretParameterNames?: string[];
+  /**
+   * When set, additionally deploys an ECS Fargate task definition
+   * launched by the orchestrator via Dagster Pipes / `PipesECSClient` under the
+   * deterministic family name `foerderturm-connector-<vendor>-ecs-<env>`. The task gets the same
+   * data-plane grants as the Lambda.
+   * @default undefined - Lambda only.
+   */
+  readonly ecsConfig?: {
+    /** The connector's ECS-flavor image. */
+    readonly imageArtifact: ContainerArtifact;
+    /** Fargate task vCPU units (256 = 0.25 vCPU). @default 512 */
+    readonly cpu?: number;
+    /** Fargate task memory in MiB; must be a valid Fargate cpu/memory combination. @default 1024 */
+    readonly memoryMiB?: number;
+  };
 }
 
 export interface FoerderturmConnectorsStackProps extends cdk.StackProps {
@@ -172,13 +223,185 @@ export class FoerderturmConnectorsStack extends cdk.Stack {
     // Staged source files for sharadar
     def.stagingBucket?.grantRead(fn);
 
+    // SSM secrets the connector fetches at runtime (e.g. the API keys). Imported once and
+    // shared with the ECS task's grants below.
+    const secretParams = (def.secretParameterNames ?? []).map((parameterName, i) =>
+      ssm.StringParameter.fromSecureStringParameterAttributes(this, `${constructId}Secret${i}`, {
+        parameterName,
+      })
+    );
+    secretParams.forEach((param) => param.grantRead(fn));
+
     new cdk.CfnOutput(this, `${constructId}FunctionName`, {
       value: fn.functionName,
       description: `Lambda function name for the ${def.vendor} connector`,
     });
 
     this.addConnectorNagSuppressions(fn);
+
+    if (def.ecsConfig) {
+      this.addConnectorEcsTask(def, def.ecsConfig, secretParams);
+    }
+
     return fn;
+  }
+
+  /**
+   * ECS Fargate task definition for a connector, following the
+   * The task is cluster-agnostic - the orchestrator supplies
+   * cluster/network/capacity at `run_task` time and injects the Dagster Pipes bootstrap
+   * plus per-run connector env via containerOverrides on the `connector` container.
+   */
+  private addConnectorEcsTask(
+    def: ConnectorDefinition,
+    ecsDef: NonNullable<ConnectorDefinition['ecsConfig']>,
+    secretParams: ssm.IStringParameter[]
+  ): void {
+    const { environment, pipesMessagesBucket: pipesBucket } = this.props;
+    const family = connectorEcsTaskFamily(def.vendor, environment);
+    const constructId = `Connector${this.pascal(def.vendor)}Ecs`;
+
+    // Deterministic role names so the orchestrator's iam:PassRole can be scoped to the shared
+    // foerderturm-connector-* prefix without a cross-stack reference.
+    const taskRole = new iam.Role(this, `${constructId}TaskRole`, {
+      roleName: connectorEcsTaskRoleName(def.vendor, environment),
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      description: `Task role for the ${def.vendor} connector ECS task`,
+    });
+    // App Signals
+    taskRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy')
+    );
+    // Give permissions to Dagster bucket
+    pipesBucket.grantPut(taskRole);
+    if (def.tableNamespace) {
+      this.grantTableAccess(taskRole, def.tableNamespace);
+    }
+    def.stagingBucket?.grantRead(taskRole);
+    secretParams.forEach((param) => param.grantRead(taskRole));
+
+    const executionRole = new iam.Role(this, `${constructId}ExecRole`, {
+      roleName: connectorEcsExecRoleName(def.vendor, environment),
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      description: `Execution role for the ${def.vendor} connector ECS backfill task`,
+    });
+    executionRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy')
+    );
+
+    const logGroup = new logs.LogGroup(this, `${constructId}LogGroup`, {
+      logGroupName: `/ecs/${family}`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // CloudWatch agent config with Application Signals enabled, delivered as an ECS "secret"
+    // (CW_CONFIG_CONTENT) - hence the execution-role read grant.
+    const cwAgentConfig = new ssm.StringParameter(this, `${constructId}CwAgentConfig`, {
+      parameterName: `/foerderturm-${environment}/${def.vendor}/ecs-cwagent`,
+      stringValue: JSON.stringify({
+        traces: { traces_collected: { application_signals: {} } },
+        logs: { metrics_collected: { application_signals: {} } },
+      }),
+    });
+    cwAgentConfig.grantRead(executionRole);
+
+    const taskDef = new ecs.FargateTaskDefinition(this, `${constructId}Task`, {
+      family,
+      cpu: ecsDef.cpu ?? 512,
+      memoryLimitMiB: ecsDef.memoryMiB ?? 1024,
+      runtimePlatform: {
+        cpuArchitecture: ecs.CpuArchitecture.X86_64,
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+      },
+      taskRole,
+      executionRole,
+      volumes: [{ name: OTEL_PYTHON_VOLUME }],
+    });
+
+    // (1) init - copies the ADOT Python distro into the shared volume.
+    const init = taskDef.addContainer('init', {
+      containerName: 'init',
+      image: ecs.ContainerImage.fromRegistry(ADOT_PYTHON_ECS_IMAGE),
+      essential: false,
+      command: ['cp', '-a', '/autoinstrumentation/.', OTEL_PYTHON_MOUNT_PATH],
+      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'init', logGroup }),
+    });
+    init.addMountPoints({
+      sourceVolume: OTEL_PYTHON_VOLUME,
+      containerPath: OTEL_PYTHON_MOUNT_PATH,
+      readOnly: false,
+    });
+
+    // (2) CloudWatch agent sidecar.
+    const cwAgent = taskDef.addContainer('ecs-cwagent', {
+      containerName: 'ecs-cwagent',
+      image: ecs.ContainerImage.fromRegistry(CLOUDWATCH_AGENT_IMAGE),
+      essential: false,
+      secrets: { CW_CONFIG_CONTENT: ecs.Secret.fromSsmParameter(cwAgentConfig) },
+      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'ecs-cwagent', logGroup }),
+    });
+
+    // (3) the connector itself - the `ecs`-target image; its entry point is baked in.
+    const connector = taskDef.addContainer(connectorEcsContainerName, {
+      containerName: connectorEcsContainerName,
+      image: getContainerImage(this, `${constructId}Image`, ecsDef.imageArtifact),
+      essential: true,
+      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'connector', logGroup }),
+      environment: {
+        // Application Signals sidecar strategy: sitecustomize-based auto-instrumentation via
+        // PYTHONPATH (auto_instrumentation dir first, app code at /app, distro root last),
+        // exporting to the agent on localhost.
+        PYTHONPATH: `${OTEL_PYTHON_MOUNT_PATH}/opentelemetry/instrumentation/auto_instrumentation:/app:${OTEL_PYTHON_MOUNT_PATH}`,
+        OTEL_PYTHON_DISTRO: 'aws_distro',
+        OTEL_PYTHON_CONFIGURATOR: 'aws_configurator',
+        OTEL_AWS_APPLICATION_SIGNALS_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: 'http://localhost:4316/v1/traces',
+        OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT: 'http://localhost:4316/v1/metrics',
+        // Sample 100% locally for now
+        // TODO: Change to X-Ray sampler later
+        OTEL_TRACES_SAMPLER: 'parentbased_traceidratio',
+        OTEL_TRACES_SAMPLER_ARG: '1.0',
+        // These exist by default in lambda but not here
+        OTEL_PROPAGATORS: 'tracecontext,baggage,xray',
+        OTEL_METRICS_EXPORTER: 'awsemf',
+        OTEL_LOGS_EXPORTER: 'none',
+        // Identical telemetry identity to the Lambda flavor.
+        OTEL_SERVICE_NAME: `foerderturm-connector-${def.vendor}`,
+        OTEL_PYTHON_DISABLED_INSTRUMENTATIONS:
+          def.enabledInstrumentations !== undefined
+            ? this.enableInstrumentations(def.enabledInstrumentations)
+            : '',
+        OTEL_RESOURCE_ATTRIBUTES: [
+          `service.version=${ecsDef.imageArtifact.version}`,
+          `service.namespace=foerderturm`,
+          `deployment.environment.name=${environment}`,
+        ].join(','),
+        ...(def.tableNamespace && {
+          TABLE_BUCKET_ARN: def.tableNamespace.tableBucket.tableBucketArn,
+        }),
+        // Any extra connector-specific config; merged last so it can override the above.
+        // Per-run env (Dagster Pipes bootstrap, feed/source) arrives via containerOverrides.
+        ...def.environmentVars,
+      },
+    });
+    connector.addContainerDependencies(
+      { container: init, condition: ecs.ContainerDependencyCondition.SUCCESS },
+      { container: cwAgent, condition: ecs.ContainerDependencyCondition.START }
+    );
+    connector.addMountPoints({
+      sourceVolume: OTEL_PYTHON_VOLUME,
+      containerPath: OTEL_PYTHON_MOUNT_PATH,
+      readOnly: false,
+    });
+
+    new cdk.CfnOutput(this, `${constructId}TaskFamily`, {
+      value: family,
+      description: `ECS task-definition family for the ${def.vendor} connector backfill task`,
+    });
+
+    this.addConnectorEcsNagSuppressions(taskDef, taskRole, executionRole);
   }
 
   /**
@@ -186,7 +409,7 @@ export class FoerderturmConnectorsStack extends cdk.Stack {
    * scopes per-table: the table id is the segment after `/table/` in each table ARN.
    * Fails if namespace has no tables.
    */
-  private grantTableAccess(fn: lambda.IFunction, namespace: ConnectorTableNamespace): void {
+  private grantTableAccess(grantee: iam.IGrantable, namespace: ConnectorTableNamespace): void {
     const tableArns = Array.from(namespace.tables.values(), (t) => t.tableArn);
     if (tableArns.length === 0) {
       throw new Error(
@@ -194,7 +417,7 @@ export class FoerderturmConnectorsStack extends cdk.Stack {
       );
     }
     for (const arn of tableArns) {
-      namespace.tableBucket.grantReadWrite(fn, cdk.Fn.select(1, cdk.Fn.split('/table/', arn)));
+      namespace.tableBucket.grantReadWrite(grantee, cdk.Fn.select(1, cdk.Fn.split('/table/', arn)));
     }
   }
 
@@ -223,6 +446,62 @@ export class FoerderturmConnectorsStack extends cdk.Stack {
     return ADOT_PYTHON_DISABLED_INSTRUMENTATIONS.filter((name) => !enabledSet.has(name)).join(',');
   }
 
+  private addConnectorEcsNagSuppressions(
+    taskDef: ecs.FargateTaskDefinition,
+    taskRole: iam.Role,
+    executionRole: iam.Role
+  ): void {
+    NagSuppressions.addResourceSuppressions(
+      taskRole,
+      [
+        {
+          id: 'AwsSolutions-IAM4',
+          reason:
+            'CloudWatchAgentServerPolicy is the AWS-managed policy the CloudWatch agent sidecar ' +
+            'requires to export Application Signals metrics, X-Ray traces, and logs.',
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'Pipes-bucket put is scoped to the bucket objects path (grantPut emits object-key ' +
+            'wildcards); S3 Tables read/write is scoped to the bronze table bucket but uses the ' +
+            'per-table grant form; SSM secret reads are scoped to specific parameter ARNs.',
+        },
+      ],
+      true
+    );
+    NagSuppressions.addResourceSuppressions(
+      executionRole,
+      [
+        {
+          id: 'AwsSolutions-IAM4',
+          reason:
+            'AmazonECSTaskExecutionRolePolicy is the standard AWS-managed execution-role policy ' +
+            '(ECR pull + CloudWatch Logs); the CW agent config read is scoped to its SSM parameter.',
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          appliesTo: ['Resource::*'],
+          reason:
+            'ecr:GetAuthorizationToken must be granted on Resource:* - it is an account-level ' +
+            'action with no resource scope; CDK adds it to the execution-role default policy when ' +
+            'the connector image is pulled from ECR. All other ECR/logs actions remain scoped.',
+        },
+      ],
+      true
+    );
+    NagSuppressions.addResourceSuppressions(
+      taskDef,
+      [
+        {
+          id: 'AwsSolutions-ECS2',
+          reason: 'Env vars on the containers hold non-secret config only.',
+        },
+      ],
+      true
+    );
+  }
+
   private addConnectorNagSuppressions(fn: lambda.DockerImageFunction): void {
     NagSuppressions.addResourceSuppressions(
       fn,
@@ -235,7 +514,7 @@ export class FoerderturmConnectorsStack extends cdk.Stack {
         {
           id: 'AwsSolutions-IAM5',
           reason:
-            'CloudWatchLambdaApplicationSignalsExecutionRolePolicy and the active-tracing X-Ray policy grant xray/cloudwatch publish actions that do not support resource-level scoping; required for Application Signals export. S3 Tables read/write is scoped to the bronze table bucket but uses the all-tables ("*") form, and the staging-bucket read is scoped to a single bucket (grantRead emits object-key wildcards).',
+            'CloudWatchLambdaApplicationSignalsExecutionRolePolicy and the active-tracing X-Ray policy grant xray/cloudwatch publish actions that do not support resource-level scoping; required for Application Signals export. S3 Tables read/write is scoped to the bronze table bucket but uses the all-tables ("*") form, the staging-bucket read is scoped to a single bucket (grantRead emits object-key wildcards), and SSM secret reads are scoped to specific parameter ARNs.',
         },
       ],
       true

@@ -478,6 +478,23 @@ The pipeline's synth step reads artifact versions from the committed `version-ma
 > manual approval already helps here. See `IcebergColumn.renamedFrom` in
 > `lib/infrastructure/iceberg-schema.ts` for the full rationale.
 
+> [!WARNING]
+> **Iceberg column renames + superseded pipelines.** Renaming a column on an Iceberg
+> table (via the `s3tables-table-manager` custom resource) is a **two-deploy migration**:
+> deploy 1 sets `renamedFrom` on the column and performs a true `rename_column`; deploy 2
+> removes the directive. This is only safe if deploy 1 reaches **every** stage before
+> deploy 2 does. CDK Pipelines / CodePipeline run in the default **SUPERSEDED** execution
+> mode, so a quickly-merged deploy 2 can leapfrog deploy 1 at a stage transition (e.g.
+> Staging → Prod) and hit a not-yet-renamed table with no `renamedFrom` present — the
+> reconciler then **drops the old column (losing its data) and adds an empty new one**
+> instead of renaming.
+>
+> Because `renamedFrom` is idempotent and self-deactivating, the safe default is to **leave
+> the directive in place** and only remove it much later as unhurried housekeeping (once the
+> rename has provably reached every stage), and/or gate the two deploys — the Prod stage's
+> manual approval already helps here. See `IcebergColumn.renamedFrom` in
+> `lib/infrastructure/iceberg-schema.ts` for the full rationale.
+
 ### Development Pipeline (`DevelopmentPipelineStack`)
 
 - **Triggered by**: CodePipeline V2 push trigger on all branches matching `dev-*`

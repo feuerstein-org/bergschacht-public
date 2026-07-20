@@ -265,9 +265,12 @@ describe('FoerderturmStack', () => {
     });
   });
 
-  test('names the ECS cluster and service', () => {
+  test('names the ECS clusters and service', () => {
     template.hasResourceProperties('AWS::ECS::Cluster', {
       ClusterName: 'foerderturm-test',
+    });
+    template.hasResourceProperties('AWS::ECS::Cluster', {
+      ClusterName: 'foerderturm-workers-test',
     });
     template.hasResourceProperties('AWS::ECS::Service', {
       ServiceName: 'foerderturm-test',
@@ -303,6 +306,95 @@ describe('FoerderturmStack', () => {
               'Fn::Join': Match.arrayWith([
                 Match.arrayWith([Match.stringLikeRegexp('function:foerderturm-connector-\\*')]),
               ]),
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('associates the FARGATE and FARGATE_SPOT capacity providers on the workers cluster only', () => {
+    template.resourceCountIs('AWS::ECS::ClusterCapacityProviderAssociations', 1);
+    template.hasResourceProperties('AWS::ECS::ClusterCapacityProviderAssociations', {
+      CapacityProviders: ['FARGATE', 'FARGATE_SPOT'],
+      Cluster: { Ref: Match.stringLikeRegexp('WorkersCluster') },
+    });
+  });
+
+  test('creates an egress-only security group for connector backfill tasks', () => {
+    template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+      GroupDescription: Match.stringLikeRegexp('connector ECS tasks'),
+    });
+  });
+
+  test('injects the connector ECS launch parameters into the dagster containers', () => {
+    const ecsEnv = Match.arrayWith([
+      { Name: 'CONNECTOR_ECS_CLUSTER', Value: 'foerderturm-workers-test' },
+      Match.objectLike({ Name: 'CONNECTOR_ECS_SUBNETS' }),
+      Match.objectLike({ Name: 'CONNECTOR_ECS_SECURITY_GROUP' }),
+      {
+        Name: 'CONNECTOR_EXAMPLE_ECS_TASK_FAMILY',
+        Value: 'foerderturm-connector-example-ecs-test',
+      },
+      {
+        Name: 'CONNECTOR_MASSIVE_ECS_TASK_FAMILY',
+        Value: 'foerderturm-connector-massive-ecs-test',
+      },
+    ]);
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({ Name: 'dagster-webserver', Environment: ecsEnv }),
+        Match.objectLike({ Name: 'dagster-daemon', Environment: ecsEnv }),
+      ]),
+    });
+  });
+
+  test('grants the task role RunTask scoped to connector task definitions on the workers cluster', () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Allow',
+            Action: 'ecs:RunTask',
+            Resource: {
+              'Fn::Join': Match.arrayWith([
+                Match.arrayWith([
+                  Match.stringLikeRegexp('task-definition/foerderturm-connector-\\*'),
+                ]),
+              ]),
+            },
+            Condition: {
+              ArnEquals: {
+                'ecs:cluster': { 'Fn::GetAtt': [Match.stringLikeRegexp('WorkersCluster'), 'Arn'] },
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
+  test('grants the task role task tracking and PassRole restricted to ECS tasks', () => {
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['ecs:DescribeTasks', 'ecs:StopTask', 'ecs:TagResource'],
+            Resource: {
+              'Fn::Join': Match.arrayWith([
+                Match.arrayWith([Match.stringLikeRegexp('task/foerderturm-workers-test/\\*')]),
+              ]),
+            },
+          }),
+          Match.objectLike({
+            Action: 'iam:PassRole',
+            Resource: {
+              'Fn::Join': Match.arrayWith([
+                Match.arrayWith([Match.stringLikeRegexp('role/foerderturm-connector-\\*')]),
+              ]),
+            },
+            Condition: {
+              StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' },
             },
           }),
         ]),

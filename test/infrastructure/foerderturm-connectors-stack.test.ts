@@ -272,4 +272,187 @@ describe('FoerderturmConnectorsStack - bronze-writing connector', () => {
       },
     });
   });
+
+  test('imports and grants read on each secret SSM parameter by name', () => {
+    const { template: withSecret } = createBronzeConnectorStack({
+      secretParameterNames: ['/foerderturm-test/massive/api-key'],
+    });
+    // grantRead on the imported parameter emits the ssm:Get* action set...
+    withSecret.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Effect: 'Allow',
+            Action: Match.arrayWith([Match.stringLikeRegexp('ssm:GetParameter')]),
+          }),
+        ]),
+      },
+    });
+    // ...scoped to that parameter's ARN, not a wildcard.
+    const policies = JSON.stringify(Object.values(withSecret.findResources('AWS::IAM::Policy')));
+    expect(policies).toContain('parameter/foerderturm-test/massive/api-key');
+  });
+});
+
+const TEST_CONNECTOR_ECS_IMAGE_ARTIFACT = {
+  repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',
+  imageTag: 'foerderturm-connector-example-ecs-container-0.2.0',
+  version: '0.2.0',
+  commitSha: 'abcdef1234567',
+};
+
+const EXAMPLE_WITH_ECS: ConnectorDefinition = {
+  ...EXAMPLE,
+  ecsConfig: { imageArtifact: TEST_CONNECTOR_ECS_IMAGE_ARTIFACT },
+};
+
+describe('FoerderturmConnectorsStack - ECS backfill task', () => {
+  let template: Template;
+
+  beforeEach(() => {
+    ({ template } = createTestStack([EXAMPLE_WITH_ECS]));
+  });
+
+  test('deploys no task definition unless ecsBackfill is set', () => {
+    const { template: lambdaOnly } = createTestStack([EXAMPLE]);
+    lambdaOnly.resourceCountIs('AWS::ECS::TaskDefinition', 0);
+  });
+
+  test('creates a Fargate task definition with the deterministic family and sizing defaults', () => {
+    template.resourceCountIs('AWS::ECS::TaskDefinition', 1);
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      Family: 'foerderturm-connector-example-ecs-test',
+      Cpu: '512',
+      Memory: '1024',
+      RequiresCompatibilities: ['FARGATE'],
+      NetworkMode: 'awsvpc',
+      RuntimePlatform: { CpuArchitecture: 'X86_64', OperatingSystemFamily: 'LINUX' },
+    });
+  });
+
+  test('follows the Application Signals sidecar strategy: init + cwagent + connector', () => {
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: [
+        Match.objectLike({
+          Name: 'init',
+          Essential: false,
+          Image: Match.stringLikeRegexp('adot-autoinstrumentation-python:v0\\.17\\.1'),
+          Command: ['cp', '-a', '/autoinstrumentation/.', '/otel-auto-instrumentation-python'],
+        }),
+        Match.objectLike({
+          Name: 'ecs-cwagent',
+          Essential: false,
+          Image: Match.stringLikeRegexp('cloudwatch-agent'),
+          Secrets: [Match.objectLike({ Name: 'CW_CONFIG_CONTENT' })],
+        }),
+        Match.objectLike({
+          Name: 'connector',
+          Essential: true,
+          Image: {
+            'Fn::Join': Match.arrayWith([
+              Match.arrayWith([Match.stringLikeRegexp(TEST_CONNECTOR_ECS_IMAGE_ARTIFACT.imageTag)]),
+            ]),
+          },
+          DependsOn: [
+            { Condition: 'SUCCESS', ContainerName: 'init' },
+            { Condition: 'START', ContainerName: 'ecs-cwagent' },
+          ],
+        }),
+      ],
+    });
+  });
+
+  test('wires the connector container to the sidecar with the injected-distro PYTHONPATH', () => {
+    const connectorEnv = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({ Name: 'connector', Environment: connectorEnv }),
+      ]),
+    });
+    const env = Object.fromEntries(
+      (connectorEnv.asArray() as { Name: string; Value: string }[]).map((e) => [e.Name, e.Value])
+    );
+    expect(env.PYTHONPATH).toBe(
+      '/otel-auto-instrumentation-python/opentelemetry/instrumentation/auto_instrumentation:/app:/otel-auto-instrumentation-python'
+    );
+    expect(env.OTEL_AWS_APPLICATION_SIGNALS_ENABLED).toBe('true');
+    expect(env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT).toBe('http://localhost:4316/v1/traces');
+    // Matches the Lambda exec wrapper's effective default, keeping xray propagation identical.
+    expect(env.OTEL_PROPAGATORS).toBe('tracecontext,baggage,xray');
+    expect(env.OTEL_TRACES_SAMPLER).toBe('parentbased_traceidratio');
+    expect(env.OTEL_TRACES_SAMPLER_ARG).toBe('1.0');
+    // Same telemetry identity as the Lambda flavor, versioned from the ecs artifact.
+    expect(env.OTEL_SERVICE_NAME).toBe('foerderturm-connector-example');
+    expect(env.OTEL_RESOURCE_ATTRIBUTES).toContain('service.version=0.2.0');
+    // The Lambda exec wrapper must NOT leak into the ECS flavor (task-level injection instead).
+    expect(env.AWS_LAMBDA_EXEC_WRAPPER).toBeUndefined();
+    expect(env.OTEL_METRICS_EXPORTER).toBe('awsemf');
+  });
+
+  test('creates deterministic task and execution roles with the required managed policies', () => {
+    template.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'foerderturm-connector-example-ecs-task-test',
+      ManagedPolicyArns: Match.arrayWith([
+        Match.objectLike({
+          'Fn::Join': Match.arrayWith([
+            Match.arrayWith([Match.stringLikeRegexp('CloudWatchAgentServerPolicy')]),
+          ]),
+        }),
+      ]),
+    });
+    template.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'foerderturm-connector-example-ecs-exec-test',
+      ManagedPolicyArns: Match.arrayWith([
+        Match.objectLike({
+          'Fn::Join': Match.arrayWith([
+            Match.arrayWith([Match.stringLikeRegexp('AmazonECSTaskExecutionRolePolicy')]),
+          ]),
+        }),
+      ]),
+    });
+  });
+
+  test('stores the CloudWatch agent Application Signals config in SSM', () => {
+    template.hasResourceProperties('AWS::SSM::Parameter', {
+      Name: '/foerderturm-test/example/ecs-cwagent',
+      Value: Match.stringLikeRegexp('application_signals'),
+    });
+  });
+
+  test('creates a dedicated log group and emits the task-family output', () => {
+    template.hasResourceProperties('AWS::Logs::LogGroup', {
+      LogGroupName: '/ecs/foerderturm-connector-example-ecs-test',
+    });
+    template.hasOutput('ConnectorExampleEcsTaskFamily', {
+      Value: 'foerderturm-connector-example-ecs-test',
+    });
+  });
+
+  test('grants a bronze-writing connector the same table/secret access on the ECS task role', () => {
+    const { template: bronze } = createBronzeConnectorStack({
+      secretParameterNames: ['/foerderturm-test/massive/api-key'],
+      ecsConfig: { imageArtifact: TEST_CONNECTOR_ECS_IMAGE_ARTIFACT },
+    });
+    // The task role's default policy carries the S3 Tables write + scoped SSM read grants.
+    bronze.hasResourceProperties('AWS::IAM::Policy', {
+      Roles: [{ Ref: Match.stringLikeRegexp('ConnectorSharadarEcsTaskRole') }],
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: Match.arrayWith(['s3tables:PutTableData']) }),
+          Match.objectLike({
+            Action: Match.arrayWith([Match.stringLikeRegexp('ssm:GetParameter')]),
+          }),
+        ]),
+      },
+    });
+    // TABLE_BUCKET_ARN reaches the connector container like it does the Lambda.
+    bronze.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({
+          Name: 'connector',
+          Environment: Match.arrayWith([Match.objectLike({ Name: 'TABLE_BUCKET_ARN' })]),
+        }),
+      ]),
+    });
+  });
 });

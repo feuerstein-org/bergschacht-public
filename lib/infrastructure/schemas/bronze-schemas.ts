@@ -9,8 +9,10 @@
  * detection, SCD2) happens in gold. Each vendor stays separate here, which is
  * what keeps this a bronze layer rather than a conformed silver one.
  *
- * Ingestion uses change-detected append: a new row is only written when
- * `record_hash` differs from the latest row for the same natural key.
+ * Ingestion uses change-detected append: existing and incoming rows are merged
+ * into a per-key timeline ordered by an `as_of` column (see DATA_DESIGN.md)
+ * and a new row is only written when its `record_hash`
+ * differs from the immediately preceding version on that timeline.
  * `record_hash` excludes provenance columns, exact exclusions are documented
  * per-table. This also handles deduplication - some vendors deliver the same
  * record multiple times, so we avoid re-ingesting it over and over. Only SCD2
@@ -129,11 +131,13 @@ export const BRONZE_SECURITY_MASTER: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'snapshot_date', transform: 'month', name: 'snapshot_month' },
   ],
-  // TODO: Figure out best sortOrder this is currently not the best I believe
-  // Need to figure out what queries gold pipeline will do and based on that create the
-  // correct sort order - e.g. since this is SCD2-ish maybe sort by ticker?
-  // Then again this is a small table so it shouldn't matter much
-  sortOrder: [{ sourceColumn: 'snapshot_date', direction: 'asc', nullOrder: 'nulls-last' }],
+  // Key-first, date-second: reads are per-key SCD timelines (ingestion's
+  // existing-rows scan filters on vendor_record_id, gold builds per-key
+  // histories), never date-range scans.
+  sortOrder: [
+    { sourceColumn: 'vendor_record_id', direction: 'asc', nullOrder: 'nulls-last' },
+    { sourceColumn: 'snapshot_date', direction: 'asc', nullOrder: 'nulls-last' },
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -179,11 +183,14 @@ export const BRONZE_FACT_DAILY_OHLCV: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'price_date', transform: 'month', name: 'price_month' },
   ],
-  // TODO: Same as above - theoretically here by ticker might be better if we
-  // analyze each ticker one by one and compare them against other vendors
-  // even if we go by time partitions - e.g. a month we probably compare a
-  // ticker over a span of a month and then the next ticker etc. right?
-  sortOrder: [{ sourceColumn: 'price_date', direction: 'asc', nullOrder: 'nulls-last' }],
+  // Key-first, date-second: gold reads one ticker's month at a time (per-ticker
+  // cross-vendor comparison), so clustering by ticker makes that one contiguous run per file.
+  // Bonus: ticker RLE-encodes to almost nothing and consecutive prices of one
+  // ticker compress far better than interleaved tickers.
+  sortOrder: [
+    { sourceColumn: 'ticker', direction: 'asc', nullOrder: 'nulls-last' },
+    { sourceColumn: 'price_date', direction: 'asc', nullOrder: 'nulls-last' },
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -305,8 +312,10 @@ export const BRONZE_FACT_CORPORATE_ACTIONS: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'effective_date', transform: 'month', name: 'effective_month' },
   ],
-  // TODO: Same as above
+  // Key-first: clusters each security's event history, effective_date/action_type keep
+  // a key's events in timeline order within a file.
   sortOrder: [
+    { sourceColumn: 'vendor_record_id', direction: 'asc', nullOrder: 'nulls-last' },
     { sourceColumn: 'effective_date', direction: 'asc', nullOrder: 'nulls-last' },
     { sourceColumn: 'action_type', direction: 'asc', nullOrder: 'nulls-last' },
   ],
@@ -405,6 +414,11 @@ export const BRONZE_FACT_DAILY_METRICS: IcebergSchemaDefinition = {
     { sourceColumn: 'source_vendor', transform: 'identity' },
     { sourceColumn: 'metric_date', transform: 'month', name: 'metric_month' },
   ],
-  // TODO: Same as above
-  sortOrder: [{ sourceColumn: 'metric_date', direction: 'asc', nullOrder: 'nulls-last' }],
+  // Key-first, date-second: same access pattern as fact_daily_ohlcv - gold
+  // reads per-ticker metric histories, so cluster by ticker for pruning and
+  // compression.
+  sortOrder: [
+    { sourceColumn: 'ticker', direction: 'asc', nullOrder: 'nulls-last' },
+    { sourceColumn: 'metric_date', direction: 'asc', nullOrder: 'nulls-last' },
+  ],
 };

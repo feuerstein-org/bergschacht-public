@@ -4,6 +4,8 @@
 
 The consequence for ingestion: anything keyed on the raw `ticker` would duplicate on every rename. The stable key is `permaticker` (Sharadar's permanent per-security id), which the connector uses as `vendor_record_id`. See [`DATA_DESIGN.md` -> Vendor ticker semantics](../../../DATA_DESIGN.md) for the as-of-date-vs-current-labeled framing that gold relies on, and [`bronze_to_gold_mapping.md`](./bronze_to_gold_mapping.md) for the resolution contract.
 
+> **Note on `lastupdated` (→ `vendor_as_of_ts`):** For Sharadar this column normally moves only because the vendor re-adjusted a row for a later split or dividend, not because the underlying values were corrected - so it **cannot be used for restatement detection**. We still stamp it as `vendor_as_of_ts` for provenance, but treat it as an adjustment marker, not a freshness / CDC signal.
+
 | Table   | Stable identity in bronze                                                 | Why                                                                                                                                                                         |
 | ------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | TICKERS | `vendor_record_id` = `permaticker`                                        | Already keyed on permaticker; a rename writes a new SCD row (the ticker timeline).                                                                                          |
@@ -117,6 +119,7 @@ In the rare case the anchor itself is absent from TICKERS (old/delisted/foreign 
 
 - **Natural key:** `(source_vendor, vendor_record_id, effective_date, raw_action_type)`. The merged `raw_action_type` keeps these grouped rows from fanning out; it still separates genuinely distinct same-day events (e.g. a same-day `spinoff` and `dividend` on one parent).
 - **`record_hash` excludes `ticker`** (on top of the standard provenance columns). A rename changes only the (excluded) `ticker`, so the hash is unchanged and no new version is written - a full ACTIONS re-ingest stays idempotent across renames. The current symbol remains recoverable from `security_master` and `TICKER_CHANGE` events; the stored `ticker` reflects whichever symbol was current when the row was first written.
+- **Version ordering (`as_of`) is `ingested_at`.** Since this table is a historical table (unlike the `TICKERS` table which is point-in-time), `effective_date` has to be in the key, so a full re-ingest carries one version per key, a vendor correction to a past event is a later run (where `ingested_at` would be different). Sharadar ACTIONS exposes no `lastupdated`, so there is no vendor freshness signal to fall back on either.
 
 Operationally, ACTIONS is re-ingested in full each run (it is small) and the change-detected append keeps storage bounded. This requires the TICKERS export to be staged alongside ACTIONS - the Dagster `sharadar_corporate_actions` asset passes it as `tickers_source`. Other tables like OHLCV don't have this issue since unlike here not the entire table is re-ingested, just the newest rows.
 
@@ -291,9 +294,7 @@ Gold resolves whether this event was an IPO by cross-referencing the IPO feed: a
 | `companysite`        | `company_website`    |                                                                                                                                                              |
 | `table`              | `NULL`               | Dropped from output, but used to exclude institutional investors, deduplicate, and split `currency` into `trading_currency`/`reporting_currency` (see below) |
 
-`source_vendor` is hardcoded to `'SHARADAR'` for all rows. `snapshot_date` is
-set to the ingestion date since the TICKERS table doesn't carry its own snapshot
-date.
+`source_vendor` is hardcoded to `'SHARADAR'` for all rows. `snapshot_date` is set to the ingestion date since the TICKERS table doesn't carry its own snapshot date. SCD `as_of` that orders a security's versions on the ticker timeline is the `ingested_at` column since this is not a time-travel feed we have to rely on our ingest time. See `DATA_DESIGN.md` for details.
 
 ### Multi-table rows: investor exclusion + deduplication
 

@@ -124,6 +124,7 @@ export class EnvironmentStage extends cdk.Stage {
       const foerderturmConfig = {
         [devAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-dev' },
         [stageAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-stage' },
+        [prodAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-prod' }, // TODO: Set desiredCount to 1 when production is fully running
       }[props.accountId];
 
       if (foerderturmConfig) {
@@ -156,6 +157,24 @@ export class EnvironmentStage extends cdk.Stage {
             enabledInstrumentations: ['threading'],
           },
         ];
+
+        // Massive connector
+        // Create this parameter manually before deploying to the environment(s)
+        const massiveApiKeyParam = `/foerderturm-${props.environment}/massive/api-key`;
+        connectors.push({
+          vendor: 'massive',
+          imageArtifact: foerderturmImage('connector-massive-lambda-container'),
+          tableNamespace: bronze,
+          memoryMiB: 2048,
+          // Massive is an async aiohttp client; instrument the HTTP calls and the asyncio loop.
+          enabledInstrumentations: ['aiohttp-client', 'asyncio', 'threading'],
+          secretParameterNames: [massiveApiKeyParam],
+          environmentVars: { MASSIVE_API_KEY_SSM_PARAMETER: massiveApiKeyParam },
+          ecsConfig: {
+            imageArtifact: foerderturmImage('connector-massive-ecs-container'),
+            memoryMiB: 2048,
+          },
+        });
 
         new FoerderturmConnectorsStack(this, 'FoerderturmConnectors', {
           environment: props.environment,

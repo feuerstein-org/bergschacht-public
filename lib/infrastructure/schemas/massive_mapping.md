@@ -1,10 +1,46 @@
 # Massive -> Bronze Layer Mapping
 
-> **Ticker conventions vary by feed.** Most Massive feeds report the **as-of-date** symbol (PIT-safe), but the **IPO** feed is name-adjusted ("META instead of FB") and **Ticker Events** are queried by current ticker - both are _current-labeled_ and must not be resolved point-in-time on the event date. See [`DATA_DESIGN.md` -> Vendor ticker semantics](../../../DATA_DESIGN.md) and the resolution contract in [`bronze_to_gold_mapping.md`](./bronze_to_gold_mapping.md). Massive carries identity via `composite_figi` / `share_class_figi` (and CIK), so it has no permaticker-style `entity_id`.
+> **Ticker conventions vary by feed.** Most Massive feeds report the **as-of-date** symbol (PIT-safe), but the **IPO** feed is name-adjusted ("META instead of FB") and **Ticker Events** are queried by current ticker - both are _current-labeled_ and must not be resolved point-in-time on the event date. See [`DATA_DESIGN.md` -> Vendor ticker semantics](../../../DATA_DESIGN.md) and the resolution contract in [`bronze_to_gold_mapping.md`](./bronze_to_gold_mapping.md). Massive carries identity via `composite_figi` / `share_class_figi` (and CIK), so it has no permaticker-style `vendor_record_id`.
 
 ## Ingestion Strategy
 
-The All Tickers API (`GET /v3/reference/tickers`) is called with a specific `date` parameter to discover all available tickers on that date. For each ticker returned, the Ticker Overview API (`GET /v3/reference/tickers/{ticker}`) is called with the same `date` to retrieve detailed attributes. Together, these two APIs populate `BRONZE_SECURITY_MASTER`, `BRONZE_FACT_DAILY_INSTRUMENT_METRICS` and `BRONZE_FACT_CORPORATE_ACTIONS`.
+Massive is ingested via the [`massive-api`](https://github.com/feuerstein-org/massive-api) async client.
+
+The connector runs one **source** (API pull) per **daily partition**, and each source fans out to one or more bronze tables - fetched once, never re-fetched per target table:
+
+| Source (`feed`)      | Massive call(s)                                                    | Bronze tables                                                                  |
+| -------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `reference_snapshot` | All Tickers(`date`) + Ticker Overview(`ticker`, `date`) per ticker | `security_master`, `fact_daily_metrics`, `fact_corporate_actions` (delistings) |
+| `splits`             | Splits(`execution_date` = partition day)                           | `fact_corporate_actions`                                                       |
+| `dividends`          | Dividends(`ex_dividend_date` = partition day)                      | `fact_corporate_actions`                                                       |
+| `ticker_events`      | Ticker Events(`ticker`) per active ticker (bounded)                | `fact_corporate_actions` (ticker changes)                                      |
+
+The per-ticker Overview / Events fan-outs run concurrently to saturate the rate limiter without an unbounded coroutine count over the ~10k-ticker universe.
+
+### Date semantics (daily partition)
+
+- **`reference_snapshot`** - the partition date is the `date` query param on both calls, a genuine point-in-time as-of date (`snapshot_date` / `metric_date`) that can be historical/backfilled. All Tickers and Overview are merged per ticker into one record, Overview-preferred (richer detail call).
+- **`splits` / `dividends`** - the partition date is queried **exactly** (`execution_date` / `ex_dividend_date`), _not_ as a range. Massive exposes **no `last_updated`** on these payloads, so there is **no restatement watermark**: a corrected past-dated split/dividend is only re-captured by **re-running that day's partition** (a Dagster backfill over the affected dates), after which change-detected append writes only the diff.
+- **`ticker_events`** - **ignores the partition date.** The endpoint has no date filter (it returns a security's _whole_ change history every call) and is only offered for **active** tickers, so the connector enumerates **today's** active universe (no `date`). See [Ticker Events](#ticker-events-api---bronze_fact_corporate_actions), this feed is effectively "current state".
+
+---
+
+## Identity & change detection
+
+Massive has **no permaticker-style stable per-security id**; identity is carried by `composite_figi` / `share_class_figi` / `cik`, and bronze stores the vendor identifiers raw. The connector only needs a stable **natural key** for change-detected append (a row is written only when new or when its content hash changed):
+
+| Bronze table                                               | Append mode     | Natural key                                                                        | `record_hash` also excludes | SCD `as_of` (version ordering) |
+| ---------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------- | --------------------------- | ------------------------------ |
+| `security_master`                                          | change-detected | `(source_vendor, vendor_record_id)`                                                | `snapshot_date`             | `snapshot_date`                |
+| `fact_daily_metrics`                                       | plain append    | -                                                                                  | -                           | -                              |
+| `fact_corporate_actions` - splits / dividends / delistings | change-detected | `(source_vendor, action_type, ticker, effective_date)`                             | -                           | `ingested_at`                  |
+| `fact_corporate_actions` - ticker changes                  | change-detected | `(source_vendor, action_type, change_old_value, change_new_value, effective_date)` | `ticker`                    | `ingested_at`                  |
+
+- **`security_master`** - `vendor_record_id` = `composite_figi`, falling back to `UNRESOLVED:<ticker>` when the FIGI is null (namespaced so it never collapses onto a bare ticker). `snapshot_date` moves every run, so it is excluded from the hash; it is also the SCD `as_of` that orders a security's versions.
+- **Corporate actions `as_of`** - all corporate-action sub-feeds order versions by `ingested_at`, not by a snapshot date. Each is a discrete event whose `effective_date` is already in the key.
+- **`fact_daily_metrics`** - plain append (one row per ticker per day); operational duplicates and any restatements collapse in the bronze -> gold pipeline on `(resolved identity, metric_date)`, like the other date-keyed facts.
+- **Corporate actions - as-of-date / terminal feeds** (splits, dividends, delistings): the event's `ticker` is stable (splits/dividends are _not_ name-adjusted; a delisted symbol no longer moves), so it is safe in the key. `action_type` in the key keeps the sub-feeds from colliding in the shared `MASSIVE` partition (each is its own `append_changed` call).
+- **Corporate actions - Ticker Events** (current-labeled): keyed on the immutable change identity with the volatile current `ticker` excluded from the hash - see [Ticker Events](#ticker-events-api---bronze_fact_corporate_actions).
 
 ---
 
@@ -27,7 +63,7 @@ Fields from both APIs are merged into a single record per ticker per snapshot da
 | `sic_code`           | Overview    | `sic_code`               |                                                                                    |
 | `homepage_url`       | Overview    | `company_website`        |                                                                                    |
 | `description`        | Overview    | `instrument_description` |                                                                                    |
-| `address`            | Overview    | `location`               | Constructed from subfields, e.g. `CA; U.S.A`                                       |
+| `address`            | Overview    | `hq_location`            | Constructed from subfields, e.g. `CA; U.S.A`                                       |
 | `last_updated_utc`   | All Tickers | `vendor_as_of_ts`        |                                                                                    |
 | `round_lot`          | Overview    | `round_lot`              |                                                                                    |
 
@@ -121,7 +157,6 @@ Not name adjusted, splits are reported for whatever ticker name was used at the 
 | `id`                | `action_id`          | Unique dividend record identifier                                                                                    |
 | `distribution_type` | `raw_action_type`    | `recurring`, `special`, `supplemental`, `irregular`, `unknown`                                                       |
 | `distribution_type` | `action_type`        | `special`/`supplemental` -> `SPECIAL_DIVIDEND`; all others -> `CASH_DIVIDEND`                                        |
-| `declaration_date`  | `announcement_date`  |                                                                                                                      |
 | `ex_dividend_date`  | `effective_date`     | Canonical date for this event                                                                                        |
 | `record_date`       | `record_date`        |                                                                                                                      |
 | `pay_date`          | `pay_date`           |                                                                                                                      |
@@ -131,14 +166,17 @@ Not name adjusted, splits are reported for whatever ticker name was used at the 
 
 ### Dropped fields
 
-| Massive field                  | Reason                                                       |
-| ------------------------------ | ------------------------------------------------------------ |
-| `split_adjusted_cash_amount`   | Vendor-adjusted, stale after future splits                   |
-| `historical_adjustment_factor` | Vendor-adjusted cumulative factor, stale after future events |
+| Massive field                  | Reason                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `declaration_date`             | No `announcement_date` column in the current bronze schema - dropped until the column is added |
+| `split_adjusted_cash_amount`   | Vendor-adjusted, stale after future splits                                                     |
+| `historical_adjustment_factor` | Vendor-adjusted cumulative factor, stale after future events                                   |
 
 ---
 
 ## IPOs API -> `BRONZE_FACT_CORPORATE_ACTIONS`
+
+> **Not yet ingestable.** The `massive-api` client (v0.2.0) exposes no IPOs endpoint, so this feed is **not currently wired**. The mapping below is retained for when the endpoint ships.
 
 Delisted companies are also available.
 
@@ -204,6 +242,17 @@ Currently only supports `ticker_change` events. Events are returned as a timelin
 Note: It will only return ticker changes for a singular company, not ticker handoffs between companies. So in the case of "S" or "Q" we will not see anything.
 
 Delisted companies are not shown.
+
+### Enumeration & change detection
+
+The endpoint has **no date filter** - every call returns the security's entire ticker-change history (newest first) - and is only available for **active** tickers. So the connector enumerates **today's** active universe (All Tickers, `active=true`, **no `date`** - a historical universe would only add now-delisted tickers that return nothing and miss tickers that became active later) and re-pulls every history on each run. Idempotency comes entirely from change-detected append.
+
+Because Ticker Events is **current-labeled** - the `ticker` we query with, and store, is the security's _current_ symbol - it must **not** be keyed on `ticker`: on the next rename the whole history re-appears under the new current symbol, and keying on `ticker` would re-write every past change as a duplicate. Instead:
+
+- **Natural key** = `(source_vendor, action_type, change_old_value, change_new_value, effective_date)` - the immutable identity of the change itself.
+- **`record_hash` excludes `ticker`** - so a re-pull under a new current symbol matches on key _and_ hash and writes nothing.
+
+This mirrors the Sharadar ACTIONS handling of current-labeled feeds. Since every input is "current state" (today's universe + whole history), the feed does not vary by partition date and is best scheduled on its own cadence rather than per daily partition.
 
 For each two entries:
 
