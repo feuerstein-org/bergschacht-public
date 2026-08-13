@@ -1,5 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
-import { Template } from 'aws-cdk-lib/assertions';
+import { Template, Match } from 'aws-cdk-lib/assertions';
 import { SnsPagerDutyStack } from '../../lib/infrastructure/sns-pager-duty';
 
 describe('SnsPagerDutyStack', () => {
@@ -23,9 +23,9 @@ describe('SnsPagerDutyStack', () => {
 
   test('enforces SSL on SNS topic', () => {
     template.hasResourceProperties('AWS::SNS::TopicPolicy', {
-      PolicyDocument: {
-        Statement: [
-          {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
             Action: 'sns:Publish',
             Condition: {
               Bool: {
@@ -35,9 +35,9 @@ describe('SnsPagerDutyStack', () => {
             Effect: 'Deny',
             Principal: '*',
             Sid: 'AllowPublishThroughSSLOnly',
-          },
-        ],
-      },
+          }),
+        ]),
+      }),
     });
   });
 
@@ -58,6 +58,22 @@ describe('SnsPagerDutyStack', () => {
     template.hasOutput('EmailSubscription', {
       Description: 'Email address subscribed to PagerDuty SNS topic',
       Value: 'test-alerts@example.com',
+    });
+  });
+
+  test('lets any publisher in this account publish', () => {
+    template.hasResourceProperties('AWS::SNS::TopicPolicy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Sid: 'AllowOwnerAccountPublishing',
+            Effect: 'Allow',
+            Action: 'sns:Publish',
+            Principal: { AWS: '*' },
+            Condition: { StringEquals: { 'AWS:SourceOwner': Match.anyValue() } },
+          }),
+        ]),
+      }),
     });
   });
 });

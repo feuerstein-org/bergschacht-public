@@ -3,41 +3,78 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as rds from 'aws-cdk-lib/aws-rds';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3files from 'aws-cdk-lib/aws-s3files';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { ContainerArtifact, getContainerImage } from '../config/version-manifest';
+import { FoerderturmLifecycle, type FoerderturmLifecycleConfig } from './foerderturm-lifecycle';
 import {
-  connectorEcsTaskFamily,
-  connectorFunctionName,
-  connectorPrefix,
+  runWorkerExecRoleName,
+  runWorkerPrefix,
+  runWorkerTaskFamilyPrefix,
 } from '../config/constants';
+import { type BronzeTableNamespace, grantTableAccess } from './table-access';
+
+// TODO: Add a metric + alarm later which raises when no work was done that day, currently the lifecycle
+// could just kill the orchestrator before ANY work was done (e.g. RDS took too long to start) and we wouldn't acknowledge
+// one simple way would be to monitor S3 tables metrics for inserts or just check against Dagster itself (that might
+// be harder).
 
 /** Default Tailscale ACL tag the sidecar advertises. Must exist in the tailnet admin policy. */
 const DEFAULT_TAILSCALE_TAG = 'tag:foerderturm';
 
-/** Path the Litestream image bakes its config to (set in foerderturm's litestream.Dockerfile). */
-const LITESTREAM_CONFIG_PATH = '/etc/litestream.yml';
-
 /** Path the Tailscale image bakes its serve config to (set in foerderturm's tailscale.Dockerfile). */
 const TAILSCALE_SERVE_CONFIG_PATH = '/etc/tailscale/serve.json';
 
-/** Volume name for the task-scoped SQLite directory shared by the Dagster + Litestream containers. */
-const DAGSTER_HOME_VOLUME = 'dagster-home';
-const DAGSTER_HOME_PATH = '/app/dagster_home';
+/** Postgres port the Dagster containers connect to RDS on. */
+const POSTGRES_PORT = 5432;
 
 /** Preserve Tailscale state in S3 Files */
 const TAILSCALE_STATE_VOLUME = 'tailscale-state';
 const TAILSCALE_STATE_PATH = '/var/lib/tailscale';
 const NFS_PORT = 2049;
 
+/**
+ * One run-worker profile: the image a run executes in, plus the task role, env, and Fargate size
+ * that go with it.
+ */
+export interface RunWorkerConfig {
+  /** Immutable run-worker image artifact, resolved from the version manifest. */
+  readonly image: ContainerArtifact;
+  /**
+   * SSM SecureString parameters this worker reads at runtime (it resolves them from SSM itself).
+   * Needed permissions are granted automatically.
+   * @example { MASSIVE_API_KEY_SSM_PARAMETER: '/foerderturm-prod/massive/api-key' }
+   */
+  readonly ssmSecureParams?: Record<string, string>;
+  /**
+   * Extra non-secret env vars forwarded to this worker's run tasks.
+   * @default {}
+   */
+  readonly environmentVars?: Record<string, string>;
+  /**
+   * Fargate task vCPU units for this worker's run tasks (256 = 0.25 vCPU). Sets the
+   * worker's DEFAULT size; a per-run `ecs/cpu` Dagster tag still overrides it per run.
+   * @default the launcher's global run_resources.cpu (dagster.yaml)
+   */
+  readonly cpu?: number;
+  /**
+   * Fargate task memory (MiB) for this worker's run tasks (e.g. 1024), must form a valid Fargate
+   * cpu/memory combination with {@link cpu}. A per-run `ecs/memory` tag overrides it per run.
+   * @default the launcher's global run_resources.memory (dagster.yaml)
+   */
+  readonly memoryMiB?: number;
+}
+
 export interface FoerderturmStackProps extends cdk.StackProps {
   /**
    * Environment name (e.g. 'dev', 'stage', 'prod') suffixed onto account-scoped resource names
-   * (ECS cluster, service, log group) and the connector Lambda names this stack invokes, so
-   * they're disambiguated in the console/CLI even though each environment is a separate account.
+   * (ECS cluster, service, log group, run-worker roles), so they're disambiguated in the console/CLI.
    * @example 'prod'
    */
   readonly environment: string;
@@ -48,23 +85,23 @@ export interface FoerderturmStackProps extends cdk.StackProps {
    */
   readonly dagsterImageArtifact: ContainerArtifact;
   /**
-   * Litestream container image artifact resolved from the version manifest.
-   * @example getImageArtifact('foerderturm', 'foerderturm-litestream')
-   */
-  readonly litestreamImageArtifact: ContainerArtifact;
-  /**
    * Tailscale container image artifact resolved from the version manifest. Same ECR repo as
-   * the Dagster/Litestream images, baked with `/etc/tailscale/serve.json` so we don't need
+   * the Dagster image, baked with `/etc/tailscale/serve.json` so we don't need
    * to inject the serve config from this stack.
    * @example getImageArtifact('foerderturm', 'foerderturm-tailscale')
    */
   readonly tailscaleImageArtifact: ContainerArtifact;
   /**
-   * Number of Fargate tasks to run 0 or 1. Set to 0 in dev/staging to reduce costs.
-   * Each task has its own ephemeral copy of the SQLite stores; running two would diverge
-   * @example 1
+   * Bronze S3 Tables namespace the run workers write to. Every run-worker task role is granted
+   * read/write on its tables  and its table-bucket ARN is forwarded to the run workers as TABLE_BUCKET_ARN.
    */
-  readonly desiredCount: number;
+  readonly bronze: BronzeTableNamespace;
+  /**
+   * Run-worker profiles, keyed by the `worker` run-tag value (e.g. `massive`, `sharadar`,
+   * `example`). Serialized to RUN_WORKER_PROFILES so WorkerImageEcsRunLauncher routes each run to
+   * its worker's image and overlays that worker's own least-privilege task role + env.
+   */
+  readonly workers: Record<string, RunWorkerConfig>;
   /**
    * Tailnet MagicDNS hostname this task registers as.
    * Resulting URL: https://<hostname>.<tailnet>.ts.net/
@@ -90,28 +127,42 @@ export interface FoerderturmStackProps extends cdk.StackProps {
    * @default 2048
    */
   readonly memoryMiB?: number;
+  /**
+   * Scheduled/on-demand start + idle shutdown for the orchestrator and RDS, so neither runs around
+   * the clock. The service's desired count is owned at runtime by the lifecycle state
+   * machines, a stack without one has no way to start or stop itself.
+   *
+   * Pass `{}` for a manual-only environment - the reaper and the stop machine still run, there is
+   * just no daily start cron.
+   * @example { startSchedule: { cron: 'cron(30 10 ? * MON-FRI *)' }, minSessionMinutes: 60 }
+   */
+  readonly lifecycle: FoerderturmLifecycleConfig;
+  /**
+   * Topic alarmed onto when a lifecycle state machine fails or times out.
+   * @example snsPagerDuty.topic
+   */
+  readonly alertTopic: sns.ITopic;
 }
 
 /**
- * Fargate-hosted Dagster orchestrator (foerderturm) with Litestream-backed SQLite
- * durability and a Tailscale sidecar for ingress.
+ * Fargate-hosted Dagster orchestrator (foerderturm) backed by RDS Postgres, with a
+ * Tailscale sidecar for ingress.
  *
  * Architecture:
  * - Minimal per-env VPC, public subnets only (no NAT)
- * - One Fargate task, six containers; the four SQLite-touching ones share a task-scoped
- *   `dagster-home` volume mounted at /app/dagster_home:
- *     1. litestream-restore (init) - restores SQLite stores from S3 and chowns the volume to uid 1000.
- *     2. dagster-init (init) - runs `dagster instance migrate` so webserver+daemon don't race
- *        on alembic CREATE TABLE on first boot. Depends on (1) SUCCESS.
- *     3. dagster-webserver - Dagster UI + GraphQL on :3000. Depends on (2) SUCCESS.
- *     4. dagster-daemon - schedules, sensors, run queue. Depends on (2) SUCCESS.
- *     5. litestream - streaming WAL replication to S3. Depends on (2) SUCCESS (so the schema is
- *        fully migrated before Litestream attaches and forces WAL mode).
- *     6. tailscale - tagged node serving HTTPS:443 -> http://127.0.0.1:3000 via MagicDNS.
- * - The reason we need a separate litestream-restore and normal litestream conatiner is that
- *   normally litestream executes the application using exec but we have 2 (webserver and daemon)
- *   so we need to first restore the DB, then start dagster init to bootstrap if needed, then litestream
- *   and then the actual applications
+ * - RDS Postgres for Dagster, this is what lets ECS workers write events to shared
+ *   storage and survive orchestrator deploys/crashes. Credentials
+ *   are in a generated Secrets Manager secret, injected into the Dagster containers as
+ *   DAGSTER_PG_{HOST,PORT,USERNAME,PASSWORD,DB}.
+ * - One Fargate task, three containers (no shared volume - dagster.yaml is baked into the
+ *   image at $DAGSTER_HOME):
+ *     1. dagster-init (init) - runs `dagster instance migrate` on every deploy to apply schema upgrades.
+ *     2. dagster-webserver - Dagster UI. Depends on (1) SUCCESS.
+ *     3. dagster-daemon - schedules, sensors, run queue. Depends on (1) SUCCESS.
+ *     4. tailscale - tagged node serving HTTPS:443 -> http://127.0.0.1:3000 via MagicDNS.
+ * - {@link FoerderturmLifecycle} (props.lifecycle): Step Functions + EventBridge Scheduler that
+ *   start RDS and scale the service to 1 on a schedule or on demand, and shut both down once the
+ *   run workers have been idle for a while.
  *
  * Operator setup (out of scope for CDK):
  * - Create the `tag:foerderturm` tag and an OAuth client in the Tailscale admin console
@@ -127,20 +178,18 @@ export interface FoerderturmStackProps extends cdk.StackProps {
 export class FoerderturmStack extends cdk.Stack {
   public readonly vpc: ec2.IVpc;
   public readonly cluster: ecs.ICluster;
-  /** Cluster for the ephemeral connector ECS tasks (backfill chunks) launched via Pipes. */
   public readonly workersCluster: ecs.ICluster;
   public readonly service: ecs.IFargateService;
-  public readonly litestreamBucket: s3.IBucket;
-  public readonly pipesMessagesBucket: s3.IBucket;
-  /**
-   * Bucket holding the Sharadar backfill CSV partitions (uploaded out-of-band). Passed to the
-   * connectors stack so the Sharadar Lambda can be granted read access.
-   */
+  public readonly database: rds.IDatabaseInstance;
+  public readonly databaseSecret: secretsmanager.ISecret;
+  // TODO: This needs to be removed once Sharadar is migrated from S3 to API
   public readonly sharadarStagingBucket: s3.IBucket;
   public readonly tailscaleSecret: ssm.IStringParameter;
   public readonly logGroup: logs.ILogGroup;
-  /** Egress-only SG the orchestrator attaches to connector ECS backfill tasks at run_task time. */
-  public readonly connectorTaskSecurityGroup: ec2.ISecurityGroup;
+  /** Egress-only SG the dagster EcsRunLauncher attaches to each run-worker task (also allowed into RDS). */
+  public readonly runWorkerSecurityGroup: ec2.ISecurityGroup;
+  /** Start/stop state machines and the lease table that own the service's desired count. */
+  public readonly lifecycle: FoerderturmLifecycle;
 
   constructor(scope: Construct, id: string, props: FoerderturmStackProps) {
     super(scope, id, props);
@@ -161,52 +210,56 @@ export class FoerderturmStack extends cdk.Stack {
           subnetType: ec2.SubnetType.PUBLIC,
           cidrMask: 24,
         },
+        {
+          name: 'Database',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+          cidrMask: 24,
+        },
       ],
       restrictDefaultSecurityGroup: true,
     });
 
-    // ---- Litestream replication bucket ----
-    this.litestreamBucket = new s3.Bucket(this, 'LitestreamBucket', {
-      encryption: s3.BucketEncryption.KMS_MANAGED,
-      bucketKeyEnabled: true,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      versioned: true,
-      enforceSSL: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      lifecycleRules: [
-        {
-          id: 'ExpireOldLitestreamGenerations',
-          noncurrentVersionExpiration: cdk.Duration.days(30),
-          enabled: true,
-        },
-        {
-          id: 'AbortIncompleteMultipartUpload',
-          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
-          enabled: true,
-        },
-      ],
+    // ---- RDS Postgres (Dagster run/event-log/schedule storage) ----
+    // Dedicated SG: ingress from the orchestrator service + run-worker tasks is
+    // granted below once those SGs exist. Isolated from the internet.
+    const dbSecurityGroup = new ec2.SecurityGroup(this, 'DatabaseSg', {
+      vpc: this.vpc,
+      allowAllOutbound: false,
+      description: `foerderturm-${environment}: RDS Postgres access`,
     });
 
-    // ---- Dagster Pipes message bucket ----
-    // The connector workers write Pipes message chunks here the daemon/webserver read them back
-    this.pipesMessagesBucket = new s3.Bucket(this, 'PipesMessagesBucket', {
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      lifecycleRules: [
-        { id: 'ExpirePipesMessages', expiration: cdk.Duration.days(1), enabled: true },
-        {
-          id: 'AbortIncompleteMultipartUpload',
-          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
-          enabled: true,
-        },
-      ],
+    const database = new rds.DatabaseInstance(this, 'Database', {
+      engine: rds.DatabaseInstanceEngine.postgres({
+        version: rds.PostgresEngineVersion.VER_18_3,
+      }),
+      instanceType: ec2.InstanceType.of(
+        ec2.InstanceClass.BURSTABLE4_GRAVITON,
+        ec2.InstanceSize.MICRO
+      ),
+      vpc: this.vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      publiclyAccessible: false,
+      securityGroups: [dbSecurityGroup],
+      multiAz: false,
+      allocatedStorage: 20,
+      storageType: rds.StorageType.GP3,
+      storageEncrypted: true,
+      databaseName: 'dagster',
+      credentials: rds.Credentials.fromGeneratedSecret('dagster', {
+        secretName: `foerderturm-${environment}/dagster/db`,
+      }),
+      backupRetention: cdk.Duration.days(7),
+      // Hardcoded, any lifecycle rules should adhere to these, see foerderturm-lifecycle.ts class docstring.
+      preferredBackupWindow: '10:50-11:20',
+      preferredMaintenanceWindow: 'Sun:03:15-Sun:03:45',
+      deleteAutomatedBackups: false,
     });
+    this.database = database;
+    this.databaseSecret = database.secret!;
 
     // ---- Sharadar staging bucket ----
     // Holds the Sharadar backfill CSV partitions, uploaded out-of-band (see
-    // scripts/split_and_upload.py in foerderturm). The Sharadar connector Lambda reads its per-year
+    // scripts/split_and_upload.py in foerderturm). The Sharadar run worker reads its per-year
     // partitions from here; the orchestrator only builds the `s3://` source globs (no read access).
     this.sharadarStagingBucket = new s3.Bucket(this, 'SharadarStagingBucket', {
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -363,19 +416,92 @@ export class FoerderturmStack extends cdk.Stack {
       enableFargateCapacityProviders: true,
     });
 
-    // ---- Connector task security group ----
-    // Egress-only SG for the connector ECS tasks the orchestrator launches via Dagster Pipes
-    // (vendor APIs, ECR pulls, S3, SSM, CloudWatch). Owned here because the orchestrator passes
-    // it in run_task's network configuration; the connectors stack only defines task definitions.
-    this.connectorTaskSecurityGroup = new ec2.SecurityGroup(this, 'ConnectorTaskSg', {
+    // ---- Run-worker task security group ----
+    this.runWorkerSecurityGroup = new ec2.SecurityGroup(this, 'RunWorkerSg', {
       vpc: this.vpc,
       allowAllOutbound: true,
-      description: `foerderturm-${environment}: egress-only SG for connector ECS tasks`,
+      description: `foerderturm-${environment}: egress-only SG for run-worker ECS tasks`,
     });
 
-    // ---- Task definition ----
-    // Task-scoped `dagster-home` volume is shared between the four SQLite-touching containers
-    // (litestream-restore, dagster-webserver, dagster-daemon, litestream sidecar).
+    // ---- Run-worker task roles + logs ----
+    // Every worker group has its own ECS task, registered dynamically by Dagster itself with these roles
+    // (family `run-worker_<worker>_<job>`) on the workers cluster with the run-worker SG.
+    const runWorkerLogGroup = new logs.LogGroup(this, 'RunWorkerLogGroup', {
+      logGroupName: `/ecs/${runWorkerPrefix}${environment}`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // Every worker gets a role with the shared grants (cwagent + bronze) plus only
+    // its own worker-specific grants + env. Assembled into `workerSpecs` -> RUN_WORKER_PROFILES.
+    const workerTaskRoles: iam.Role[] = [];
+    const workerSpecs: Record<
+      string,
+      {
+        image: string;
+        task_role_arn: string;
+        env: Record<string, string>;
+        cpu?: string;
+        memory?: string;
+      }
+    > = {};
+    for (const [name, cfg] of Object.entries(props.workers)) {
+      const pascal = name.charAt(0).toUpperCase() + name.slice(1);
+      const role = new iam.Role(this, `RunWorker${pascal}TaskRole`, {
+        assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+        description: `Task role for foerderturm-${environment} ${name} run-worker ECS tasks`,
+      });
+      role.addManagedPolicy(
+        iam.ManagedPolicy.fromAwsManagedPolicyName('CloudWatchAgentServerPolicy')
+      );
+      grantTableAccess(role, props.bronze);
+
+      const env: Record<string, string> = {};
+      // SSM SecureString params this worker reads (e.g. the Massive API key). Grant + forward the
+      // parameter NAME (not the value); the worker resolves it from SSM at runtime via this role.
+      for (const [envVar, parameterName] of Object.entries(cfg.ssmSecureParams ?? {})) {
+        const param = ssm.StringParameter.fromSecureStringParameterAttributes(
+          this,
+          `${pascal}-${envVar}`,
+          { parameterName }
+        );
+        param.grantRead(role);
+        env[envVar] = parameterName;
+      }
+      // Sharadar's staging bucket is stack-owned (not a prop input), so wire its read + env here.
+      // TODO: Once sharadar no longer relies on the bucket, remove this.
+      if (name === 'sharadar') {
+        this.sharadarStagingBucket.grantRead(role);
+        env.SHARADAR_STAGING_BUCKET = this.sharadarStagingBucket.bucketName;
+      }
+      // Arbitrary per-worker env last, so a worker can override any derived var.
+      Object.assign(env, cfg.environmentVars ?? {});
+      this.addRunWorkerRoleNagSuppressions(role);
+
+      workerSpecs[name] = {
+        image: `${cfg.image.repository}:${cfg.image.imageTag}`,
+        task_role_arn: role.roleArn,
+        env,
+        // Per-worker Fargate size (default; a per-run ecs/cpu|ecs/memory tag overrides it).
+        ...(cfg.cpu !== undefined ? { cpu: String(cfg.cpu) } : {}),
+        ...(cfg.memoryMiB !== undefined ? { memory: String(cfg.memoryMiB) } : {}),
+      };
+      workerTaskRoles.push(role);
+    }
+
+    const runWorkerExecRole = new iam.Role(this, 'RunWorkerExecRole', {
+      roleName: runWorkerExecRoleName(environment),
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      description: `Execution role for foerderturm-${environment} Dagster run-worker ECS tasks`,
+    });
+    runWorkerExecRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy')
+    );
+    // The execution role injects the DAGSTER_PG_* container secrets (same secret the orchestrator
+    // reads), so the run worker reaches the shared Postgres.
+    this.databaseSecret.grantRead(runWorkerExecRole);
+
+    // ---- Orchestrator task definition ----
     const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
       cpu: cpu,
       memoryLimitMiB: memoryMiB,
@@ -383,96 +509,67 @@ export class FoerderturmStack extends cdk.Stack {
         cpuArchitecture: ecs.CpuArchitecture.X86_64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
       },
-      volumes: [{ name: DAGSTER_HOME_VOLUME }],
     });
 
     const dagsterImage = getContainerImage(this, 'DagsterRepo', props.dagsterImageArtifact);
-    const litestreamImage = getContainerImage(
-      this,
-      'LitestreamRepo',
-      props.litestreamImageArtifact
-    );
 
-    const litestreamEnv = {
-      LITESTREAM_BUCKET: this.litestreamBucket.bucketName,
-      LITESTREAM_SYNC_INTERVAL: '60', // sync SQLite db every 60 seconds
-    };
-    const mountDagsterHome = (container: ecs.ContainerDefinition): void => {
-      container.addMountPoints({
-        sourceVolume: DAGSTER_HOME_VOLUME,
-        containerPath: DAGSTER_HOME_PATH,
-        readOnly: false,
-      });
+    // Postgres connection params, injected from the RDS-generated secret's JSON fields.
+    // Consumed by dagster.yaml's `storage.postgres` block
+    const dagsterPgSecrets: Record<string, ecs.Secret> = {
+      DAGSTER_PG_HOST: ecs.Secret.fromSecretsManager(this.databaseSecret, 'host'),
+      DAGSTER_PG_PORT: ecs.Secret.fromSecretsManager(this.databaseSecret, 'port'),
+      DAGSTER_PG_USERNAME: ecs.Secret.fromSecretsManager(this.databaseSecret, 'username'),
+      DAGSTER_PG_PASSWORD: ecs.Secret.fromSecretsManager(this.databaseSecret, 'password'),
+      DAGSTER_PG_DB: ecs.Secret.fromSecretsManager(this.databaseSecret, 'dbname'),
     };
 
-    // Required to trigger the respective Lambdas / ECS tasks
-    const pipesEnv: Record<string, string> = {
-      PIPES_MESSAGES_BUCKET: this.pipesMessagesBucket.bucketName,
-      CONNECTOR_EXAMPLE_LAMBDA_NAME: connectorFunctionName('example', environment),
-      CONNECTOR_SHARADAR_LAMBDA_NAME: connectorFunctionName('sharadar', environment),
-      CONNECTOR_MASSIVE_LAMBDA_NAME: connectorFunctionName('massive', environment),
-      // Dedicated bucket, so partitions are staged at the root (`<bucket>/sep/...`, `<bucket>/tickers/...`).
-      SHARADAR_STAGING_BUCKET: this.sharadarStagingBucket.bucketName,
-      // Shared launch parameters for connector ECS tasks (PipesECSClient run_task):
-      // this cluster, its public subnets (public IP for egress - no NAT), and the egress-only SG.
-      CONNECTOR_ECS_CLUSTER: workersClusterName,
-      CONNECTOR_ECS_SUBNETS: this.vpc.publicSubnets.map((subnet) => subnet.subnetId).join(','),
-      CONNECTOR_ECS_SECURITY_GROUP: this.connectorTaskSecurityGroup.securityGroupId,
-      // Task-definition family names resolve to the latest ACTIVE revision at run_task time.
-      CONNECTOR_EXAMPLE_ECS_TASK_FAMILY: connectorEcsTaskFamily('example', environment),
-      CONNECTOR_MASSIVE_ECS_TASK_FAMILY: connectorEcsTaskFamily('massive', environment),
+    // SHARED run-worker runtime config, forwarded (via the launcher's `env_vars`) from the
+    // daemon/webserver process onto EVERY ECS run-worker task. Worker-SPECIFIC config
+    // (e.g. the Massive API-key SSM name) is NOT here - it rides in the RUN_WORKER_PROFILES
+    // below (defined in workerSpecs), so each worker gets only its own config.
+    const runtimeEnv: Record<string, string> = {
+      TABLE_BUCKET_ARN: props.bronze.tableBucket.tableBucketArn,
+      // Per-env OpenTelemetry resource attributes forwarded to each run worker
+      OTEL_RESOURCE_ATTRIBUTES: `service.namespace=foerderturm,deployment.environment.name=${environment}`,
     };
 
-    // (1) Litestream restore - init container. Restores the three SQLite stores from S3 (no-op
-    // when no replica exists, i.e. cold-start with empty DB).
-    const litestreamRestoreCommand = [
-      `mkdir -p ${DAGSTER_HOME_PATH}/history ${DAGSTER_HOME_PATH}/schedules`,
-      `litestream restore -if-replica-exists -config ${LITESTREAM_CONFIG_PATH} ${DAGSTER_HOME_PATH}/history/runs.db`,
-      `litestream restore -if-replica-exists -config ${LITESTREAM_CONFIG_PATH} ${DAGSTER_HOME_PATH}/history/event_log.db`,
-      `litestream restore -if-replica-exists -config ${LITESTREAM_CONFIG_PATH} ${DAGSTER_HOME_PATH}/schedules/schedules.db`,
-      `chown -R 1000:1000 ${DAGSTER_HOME_PATH}`,
-    ].join(' && ');
-    const litestreamRestore = taskDef.addContainer('litestream-restore', {
-      containerName: 'litestream-restore',
-      image: litestreamImage,
-      essential: false,
-      // Override the scratch image's USER nonroot:nonroot - restore needs root
-      // to mkdir under the root-owned volume mount and to chown it to uid 1000.
-      user: '0:0',
-      entryPoint: ['/bin/sh', '-c'],
-      command: [litestreamRestoreCommand],
-      environment: litestreamEnv,
-      logging: ecs.LogDriver.awsLogs({
-        streamPrefix: 'litestream-restore',
-        logGroup: this.logGroup,
-      }),
-    });
-    mountDagsterHome(litestreamRestore);
+    // Config for WorkerImageEcsRunLauncher (foerderturm's dagster.yaml run_launcher block).
+    // The launcher reads these from the daemon/webserver process env: RUN_WORKER_CLUSTER /
+    // RUN_WORKER_LOG_GROUP / RUN_WORKER_*_ROLE_ARN via StringSource, and RUN_WORKER_SUBNETS /
+    // RUN_WORKER_SECURITY_GROUP / RUN_WORKER_DB_SECRET_ARN in Python (list/secret shapes config
+    // env-interpolation can't express).
+    const runLauncherEnv: Record<string, string> = {
+      RUN_WORKER_CLUSTER: workersClusterName,
+      RUN_WORKER_SUBNETS: this.vpc.publicSubnets.map((subnet) => subnet.subnetId).join(','),
+      RUN_WORKER_SECURITY_GROUP: this.runWorkerSecurityGroup.securityGroupId,
+      RUN_WORKER_LOG_GROUP: runWorkerLogGroup.logGroupName,
+      RUN_WORKER_EXECUTION_ROLE_ARN: runWorkerExecRole.roleArn,
+      RUN_WORKER_DB_SECRET_ARN: this.databaseSecret.secretArn,
+      // JSON `worker` run-tag value -> {image, task_role_arn, env}. The launcher routes a
+      // `worker: <name>` run to its image, overlays its least-privilege task role, and appends
+      // its worker-specific env. Built with `toJsonString` because the role ARNs (and Sharadar's
+      // staging bucket name) are CFN tokens - it resolves them into the JSON via Fn::Join at synth.
+      RUN_WORKER_PROFILES: this.toJsonString(workerSpecs),
+    };
 
-    // (2) Dagster init - one-shot `dagster instance migrate` so the long-running webserver and
-    // daemon don't race on first boot (both would otherwise run alembic CREATE TABLE concurrently
-    // on a fresh SQLite DB and the loser crashes with "alembic_version already exists").
-    const dagsterInitPrep = `mkdir -p "$DAGSTER_HOME"/history "$DAGSTER_HOME"/schedules && cp -n /etc/dagster.yaml "$DAGSTER_HOME"/dagster.yaml`;
+    // (1) Initializes Dagster from DB.
     const dagsterInit = taskDef.addContainer('dagster-init', {
       containerName: 'dagster-init',
       image: dagsterImage,
       essential: false,
-      entryPoint: ['/bin/sh', '-c'],
-      command: [`${dagsterInitPrep} && exec dagster instance migrate`],
+      command: ['dagster', 'instance', 'migrate'],
+      environment: runLauncherEnv,
+      secrets: dagsterPgSecrets,
       logging: ecs.LogDriver.awsLogs({ streamPrefix: 'dagster-init', logGroup: this.logGroup }),
     });
-    mountDagsterHome(dagsterInit);
-    dagsterInit.addContainerDependencies({
-      container: litestreamRestore,
-      condition: ecs.ContainerDependencyCondition.SUCCESS,
-    });
 
-    // (3) Dagster webserver - Dagster UI + GraphQL on port 3000 (consumed by the Tailscale sidecar over loopback).
+    // (2) Dagster webserver - Dagster UI + GraphQL on port 3000 (consumed by the Tailscale sidecar over loopback).
     const dagsterWebserver = taskDef.addContainer('dagster-webserver', {
       containerName: 'dagster-webserver',
       image: dagsterImage,
       essential: true,
-      environment: pipesEnv,
+      environment: { ...runtimeEnv, ...runLauncherEnv },
+      secrets: dagsterPgSecrets,
       command: [
         'dagster-webserver',
         '--host',
@@ -488,44 +585,27 @@ export class FoerderturmStack extends cdk.Stack {
       }),
       portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
     });
-    mountDagsterHome(dagsterWebserver);
     dagsterWebserver.addContainerDependencies({
       container: dagsterInit,
       condition: ecs.ContainerDependencyCondition.SUCCESS,
     });
 
-    // (4) Dagster daemon - schedules, sensors, run queue. Same image, daemon command.
+    // (3) Dagster daemon - schedules, sensors, run queue. Same image, daemon command.
     const dagsterDaemon = taskDef.addContainer('dagster-daemon', {
       containerName: 'dagster-daemon',
       image: dagsterImage,
       essential: true,
-      environment: pipesEnv,
+      environment: { ...runtimeEnv, ...runLauncherEnv },
+      secrets: dagsterPgSecrets,
       command: ['dagster-daemon', 'run', '--module-name', 'foerderturm'],
       logging: ecs.LogDriver.awsLogs({ streamPrefix: 'dagster-daemon', logGroup: this.logGroup }),
     });
-    mountDagsterHome(dagsterDaemon);
     dagsterDaemon.addContainerDependencies({
       container: dagsterInit,
       condition: ecs.ContainerDependencyCondition.SUCCESS,
     });
 
-    // (5) Litestream replicate - long-running sidecar streaming SQLite WAL -> S3.
-    const litestreamSidecar = taskDef.addContainer('litestream', {
-      containerName: 'litestream',
-      image: litestreamImage,
-      essential: true,
-      user: '1000:1000', // Match appuser set up by litestream-restore
-      command: ['replicate', '-config', LITESTREAM_CONFIG_PATH],
-      environment: { ...litestreamEnv, LOG_LEVEL: 'warn' }, // Litetream logs on every sync to S3, this isn't needed
-      logging: ecs.LogDriver.awsLogs({ streamPrefix: 'litestream', logGroup: this.logGroup }),
-    });
-    mountDagsterHome(litestreamSidecar);
-    litestreamSidecar.addContainerDependencies({
-      container: dagsterInit,
-      condition: ecs.ContainerDependencyCondition.SUCCESS,
-    });
-
-    // (6) Tailscale sidecar: registers as a tagged node and serves HTTPS via MagicDNS.
+    // (4) Tailscale sidecar: registers as a tagged node and serves HTTPS via MagicDNS.
     const tailscale = taskDef.addContainer('tailscale', {
       containerName: 'tailscale',
       image: getContainerImage(this, 'TailscaleRepo', props.tailscaleImageArtifact),
@@ -554,39 +634,32 @@ export class FoerderturmStack extends cdk.Stack {
 
     // Register the S3 Files volume. CDK has no L2 for s3filesVolumeConfiguration yet, so we declare
     // the volume name through the L2 (keeps mount-point validation happy + fixes its array index)
-    // and inject the S3 Files config via an escape hatch. dagster-home is Volumes[0]; this is [1].
+    // and inject the S3 Files config via an escape hatch. It is the only volume now → Volumes[0].
     taskDef.addVolume({ name: TAILSCALE_STATE_VOLUME });
     const cfnTaskDef = taskDef.node.defaultChild as ecs.CfnTaskDefinition;
-    cfnTaskDef.addPropertyOverride('Volumes.1.S3FilesVolumeConfiguration', {
+    cfnTaskDef.addPropertyOverride('Volumes.0.S3FilesVolumeConfiguration', {
       FileSystemArn: tailscaleStateFs.attrFileSystemArn,
       RootDirectory: '/',
     });
 
     // ---- Task role permissions ----
-    this.litestreamBucket.grantReadWrite(taskDef.taskRole);
-    this.pipesMessagesBucket.grantRead(taskDef.taskRole);
-
-    // Give permissions to access S3 Files.
-    taskDef.taskRole.addManagedPolicy(
-      iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FilesClientFullAccess')
-    );
-
+    // S3 Files client access, scoped to the Tailscale statedir file system.
     taskDef.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
-        actions: ['lambda:InvokeFunction'],
-        resources: [
-          this.formatArn({
-            service: 'lambda',
-            resource: 'function',
-            resourceName: `${connectorPrefix}*`,
-            arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
-          }),
-        ],
+        actions: ['s3files:ClientMount', 's3files:ClientWrite', 's3files:ClientRootAccess'],
+        resources: [tailscaleStateFs.attrFileSystemArn],
       })
     );
 
-    // ---- Connector ECS tasks permissions (PipesECSClient) ----
-    // Allow running the tasks
+    // Orchestrator (daemon) EcsRunLauncher grants: the launcher registers a run-worker task def per
+    // run, runs it on the workers cluster, and passes the two run-worker roles needed (exec & task role).
+    taskDef.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        // RegisterTaskDefinition and DescribeTaskDefinition have no resource-level scoping (AWS-side).
+        actions: ['ecs:RegisterTaskDefinition', 'ecs:DescribeTaskDefinition'],
+        resources: ['*'],
+      })
+    );
     taskDef.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
         actions: ['ecs:RunTask'],
@@ -594,15 +667,14 @@ export class FoerderturmStack extends cdk.Stack {
           this.formatArn({
             service: 'ecs',
             resource: 'task-definition',
-            resourceName: `${connectorPrefix}*`,
+            resourceName: `${runWorkerTaskFamilyPrefix}_*`,
             arnFormat: cdk.ArnFormat.SLASH_RESOURCE_NAME,
           }),
         ],
         conditions: { ArnEquals: { 'ecs:cluster': this.workersCluster.clusterArn } },
       })
     );
-    // Poll for completion and stop on run cancellation.
-    // Allow tagging
+    // Poll run-worker health, stop tasks on cancellation, and tag launched tasks.
     taskDef.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
         actions: ['ecs:DescribeTasks', 'ecs:StopTask', 'ecs:TagResource'],
@@ -616,26 +688,12 @@ export class FoerderturmStack extends cdk.Stack {
         ],
       })
     );
-    // PipesECSClient calls DescribeTaskDefinition before RunTask
     taskDef.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
-        actions: ['ecs:DescribeTaskDefinition'],
-        resources: ['*'],
-      })
-    );
-    // Pass the connector task + execution roles (deterministic foerderturm-connector-* names).
-    taskDef.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
+        // Pass the shared execution role AND every per-worker task role - the launcher registers
+        // each worker's task def with its own role, so the orchestrator must be able to pass them.
         actions: ['iam:PassRole'],
-        resources: [
-          this.formatArn({
-            service: 'iam',
-            region: '',
-            resource: 'role',
-            resourceName: `${connectorPrefix}*`,
-            arnFormat: cdk.ArnFormat.SLASH_RESOURCE_NAME,
-          }),
-        ],
+        resources: [runWorkerExecRole.roleArn, ...workerTaskRoles.map((role) => role.roleArn)],
         conditions: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
       })
     );
@@ -644,13 +702,16 @@ export class FoerderturmStack extends cdk.Stack {
 
     // ---- ECS service ----
     // assignPublicIp=true since we run in public subnets with no NAT (egress via IGW).
-    // minimumHealthyPercent=0 + maximumPercent=100 = stop-then-start, required by SQLite's
-    // single-writer constraint (no two tasks can hold the DB open simultaneously).
+    // minimumHealthyPercent=0 + maximumPercent=100 = stop-then-start: only one orchestrator
+    // task at a time so two daemons don't double-schedule / race the run queue.
+    //
+    // desiredCount is deliberately NOT set. CDK then omits DesiredCount from the template, and
+    // CloudFormation defaults it to 1 on stack *create* while leaving the live value untouched on
+    // every *update*. That is what lets FoerderturmLifecycle own the count at runtime.
     const service = new ecs.FargateService(this, 'Service', {
       serviceName: `foerderturm-${environment}`,
       cluster: this.cluster,
       taskDefinition: taskDef,
-      desiredCount: props.desiredCount,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       minHealthyPercent: 0,
@@ -667,10 +728,60 @@ export class FoerderturmStack extends cdk.Stack {
       `NFS from the foerderturm-${environment} Fargate task to the Tailscale state file system`
     );
 
+    // Let the orchestrator task reach RDS. The run-worker task SG is also allowed so
+    // the out-of-process run workers (EcsRunLauncher, later phases) can write events to Postgres.
+    dbSecurityGroup.connections.allowFrom(
+      service,
+      ec2.Port.tcp(POSTGRES_PORT),
+      `Postgres from the foerderturm-${environment} orchestrator task`
+    );
+    dbSecurityGroup.connections.allowFrom(
+      this.runWorkerSecurityGroup,
+      ec2.Port.tcp(POSTGRES_PORT),
+      `Postgres from foerderturm-${environment} run-worker tasks`
+    );
+
+    // ---- Lifecycle: scheduled + on-demand start, idle shutdown ----
+    this.lifecycle = new FoerderturmLifecycle(this, 'Lifecycle', {
+      environment,
+      service: this.service,
+      cluster: this.cluster,
+      workersCluster: this.workersCluster,
+      database: this.database,
+      alertTopic: props.alertTopic,
+      config: props.lifecycle,
+    });
+
+    // Because the instance is stopped most of the time we send a notification any time there's an update available.
+    new rds.CfnEventSubscription(this, 'DatabaseMaintenanceEvents', {
+      snsTopicArn: props.alertTopic.topicArn,
+      sourceType: 'db-instance',
+      sourceIds: [this.database.instanceIdentifier],
+      eventCategories: ['maintenance', 'security patching'],
+      enabled: true,
+    });
+
+    new cdk.CfnOutput(this, 'LifecycleStartMachineArn', {
+      value: this.lifecycle.startStateMachine.stateMachineArn,
+      description: 'Step Functions state machine that starts the orchestrator + RDS',
+    });
+    new cdk.CfnOutput(this, 'LifecycleStopMachineArn', {
+      value: this.lifecycle.stopStateMachine.stateMachineArn,
+      description: 'Step Functions state machine that drains and stops the orchestrator + RDS',
+    });
+    new cdk.CfnOutput(this, 'LifecycleReaperMachineArn', {
+      value: this.lifecycle.reaperStateMachine.stateMachineArn,
+      description: 'Step Functions state machine that decides whether a shutdown is due',
+    });
+    new cdk.CfnOutput(this, 'LifecycleLeaseTableName', {
+      value: this.lifecycle.leaseTable.tableName,
+      description: 'DynamoDB table holding the lifecycle lease item (pk=lease)',
+    });
+
     // ---- Outputs ----
     new cdk.CfnOutput(this, 'ServiceName', {
       value: this.service.serviceName,
-      description: 'ECS service name (use with aws ecs update-service to scale)',
+      description: 'ECS service name. Scale it via the lifecycle state machines, not by hand.',
     });
     new cdk.CfnOutput(this, 'ClusterName', {
       value: this.cluster.clusterName,
@@ -678,15 +789,15 @@ export class FoerderturmStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'WorkersClusterName', {
       value: this.workersCluster.clusterName,
-      description: 'ECS cluster the connector tasks run in (PipesECSClient run_task)',
+      description: 'ECS cluster the Dagster run-worker tasks execute in (EcsRunLauncher)',
     });
-    new cdk.CfnOutput(this, 'LitestreamBucketName', {
-      value: this.litestreamBucket.bucketName,
-      description: 'S3 bucket for Dagster SQLite replication via Litestream',
+    new cdk.CfnOutput(this, 'DatabaseEndpoint', {
+      value: this.database.dbInstanceEndpointAddress,
+      description: 'RDS Postgres endpoint hosting Dagster run/event-log/schedule storage',
     });
-    new cdk.CfnOutput(this, 'PipesMessagesBucketName', {
-      value: this.pipesMessagesBucket.bucketName,
-      description: 'S3 bucket for Dagster Pipes message chunks written by connector Lambdas',
+    new cdk.CfnOutput(this, 'DatabaseSecretName', {
+      value: this.databaseSecret.secretName,
+      description: 'Secrets Manager secret holding the Dagster Postgres credentials',
     });
     new cdk.CfnOutput(this, 'SharadarStagingBucketName', {
       value: this.sharadarStagingBucket.bucketName,
@@ -708,13 +819,37 @@ export class FoerderturmStack extends cdk.Stack {
       description: 'MagicDNS hostname; full URL is https://<this>.<tailnet>.ts.net/',
     });
 
-    this.addNagSuppressions(taskDef, tailscaleStateBucket, tailscaleStateFsRole);
+    this.addNagSuppressions(taskDef, tailscaleStateBucket, tailscaleStateFsRole, runWorkerExecRole);
+  }
+
+  private addRunWorkerRoleNagSuppressions(role: iam.Role): void {
+    NagSuppressions.addResourceSuppressions(
+      role,
+      [
+        {
+          id: 'AwsSolutions-IAM4',
+          reason:
+            'CloudWatchAgentServerPolicy is the AWS-managed policy the CloudWatch-agent sidecar ' +
+            'requires to publish Application Signals metrics, X-Ray traces, and logs.',
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'S3 Tables read/write is scoped to the bronze table bucket but uses the per-table grant ' +
+            'form; a worker role additionally gets a single-bucket Sharadar staging read (grantRead ' +
+            'emits object-key wildcards) and/or a specific-parameter SSM read. These mirror the ' +
+            'data-plane access the deleted connector Lambda/ECS roles had.',
+        },
+      ],
+      true
+    );
   }
 
   private addNagSuppressions(
     taskDef: ecs.FargateTaskDefinition,
     tailscaleStateBucket: s3.Bucket,
-    tailscaleStateFsRole: iam.Role
+    tailscaleStateFsRole: iam.Role,
+    runWorkerExecRole: iam.Role
   ): void {
     NagSuppressions.addResourceSuppressions(this.vpc, [
       {
@@ -731,20 +866,38 @@ export class FoerderturmStack extends cdk.Stack {
       },
     ]);
 
-    NagSuppressions.addResourceSuppressions(this.litestreamBucket, [
+    NagSuppressions.addResourceSuppressions(this.database, [
       {
-        id: 'AwsSolutions-S1',
-        reason: 'Only used by Litestream no need to log everything.',
+        id: 'AwsSolutions-RDS3',
+        reason: 'Single-AZ is intentional for this pre-prod db.t4g.micro; HA is a later upgrade.',
+      },
+      {
+        id: 'AwsSolutions-RDS10',
+        reason:
+          'Deletion protection off: pre-prod, recreate-over-migrate; storage holds only ' +
+          'reconstructable Dagster run/event metadata, not source data.',
+      },
+      {
+        id: 'AwsSolutions-RDS11',
+        reason:
+          'Default Postgres port (5432); the DB is private (SG-scoped, not publicly accessible).',
       },
     ]);
 
-    NagSuppressions.addResourceSuppressions(this.pipesMessagesBucket, [
-      {
-        id: 'AwsSolutions-S1',
-        reason:
-          'Transient Dagster Pipes message chunks (1-day expiry); access logging not warranted.',
-      },
-    ]);
+    // The generated DB credentials secret is a child of the DatabaseInstance; applyToChildren
+    // reaches it (its node is not exposed at a stable stack-relative path).
+    NagSuppressions.addResourceSuppressions(
+      this.database,
+      [
+        {
+          id: 'AwsSolutions-SMG4',
+          reason:
+            'Automatic secret rotation not configured for this pre-prod, single-team Dagster DB; ' +
+            'credential rotation is a later hardening step.',
+        },
+      ],
+      true
+    );
 
     NagSuppressions.addResourceSuppressions(tailscaleStateBucket, [
       {
@@ -763,9 +916,7 @@ export class FoerderturmStack extends cdk.Stack {
     NagSuppressions.addResourceSuppressions(this.workersCluster, [
       {
         id: 'AwsSolutions-ECS4',
-        reason:
-          'Container Insights not needed for the ephemeral connector tasks; ' +
-          'their telemetry flows through Application Signals via the CloudWatch agent sidecar.',
+        reason: 'Container Insights not needed for the ephemeral per-run Dagster run-worker tasks.',
       },
     ]);
 
@@ -775,22 +926,42 @@ export class FoerderturmStack extends cdk.Stack {
         {
           id: 'AwsSolutions-IAM5',
           reason:
-            'ecr:GetAuthorizationToken and ecs:DescribeTaskDefinition require resource:*; ' +
-            'lambda:InvokeFunction / ecs:RunTask / iam:PassRole are scoped to the ' +
-            'foerderturm-connector-* name prefix so connectors can be added/removed without ' +
-            're-deploying this stack; ecs:DescribeTasks/StopTask/TagResource are scoped to tasks ' +
-            'on this cluster; S3 read on the Pipes bucket objects path.',
-        },
-        {
-          id: 'AwsSolutions-IAM4',
-          reason:
-            'AmazonS3FilesClientFullAccess is the AWS-managed client policy for S3 Files ' +
-            '(mount/read/write incl. ClientRootAccess); used by the task to mount the Tailscale statedir.',
+            'ecr:GetAuthorizationToken, ecs:DescribeTaskDefinition and ecs:RegisterTaskDefinition ' +
+            'require resource:* (account-level actions with no resource scope); the EcsRunLauncher ' +
+            'ecs:RunTask is scoped to the run-worker_* task-definition family prefix on the workers ' +
+            'cluster and its iam:PassRole to the named run-worker roles (base + per-worker); ' +
+            'ecs:DescribeTasks/StopTask/TagResource are scoped to tasks on the workers cluster.',
         },
         {
           id: 'AwsSolutions-ECS2',
           reason:
-            'Env vars on the containers hold non-secret config only (LITESTREAM_BUCKET, TS_HOSTNAME, etc.).',
+            'Plaintext env vars hold non-secret config only (bucket names, TS_HOSTNAME, the table-' +
+            'bucket ARN, and the RUN_WORKER_PROFILES JSON carrying per-worker image refs, role ' +
+            'ARNs, and the Massive API-key SSM *parameter name* (not the key)); the Postgres ' +
+            'credentials are injected via container `secrets` from Secrets Manager, not plaintext env.',
+        },
+      ],
+      true
+    );
+
+    // Run-worker task-role suppressions (base + per-worker) are added at construction time via
+    // addRunWorkerRoleNagSuppressions.
+
+    // Run-worker execution role: AWS-managed execution policy + the account-level ECR auth action.
+    NagSuppressions.addResourceSuppressions(
+      runWorkerExecRole,
+      [
+        {
+          id: 'AwsSolutions-IAM4',
+          reason:
+            'AmazonECSTaskExecutionRolePolicy is the standard AWS-managed execution-role policy ' +
+            '(ECR pull + CloudWatch Logs) for the run-worker tasks.',
+        },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason:
+            'ecr:GetAuthorizationToken must be granted on resource:* (account-level action, no ' +
+            'resource scope); the DB-secret read is scoped to the single generated secret ARN.',
         },
       ],
       true

@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib/core';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
@@ -34,6 +35,18 @@ export class SnsPagerDutyStack extends cdk.Stack {
     });
 
     this.topic.addSubscription(new subscriptions.EmailSubscription(props.emailAddress));
+
+    // Re-add default policy since setting enforceSSL above removes it
+    this.topic.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'AllowOwnerAccountPublishing',
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.AnyPrincipal()],
+        actions: ['sns:Publish'],
+        resources: [this.topic.topicArn],
+        conditions: { StringEquals: { 'AWS:SourceOwner': this.account } },
+      })
+    );
 
     new cdk.CfnOutput(this, 'TopicArn', {
       value: this.topic.topicArn,

@@ -48,6 +48,7 @@ run = 'pnpm run cdk diff ${usage_stacks:-"**"}'
 description = "Deploy stacks (defaults to all with '**', or pass stack names)"
 depends = ["build"]
 usage = 'arg "[stacks]..." help="Stack names to deploy (defaults to ** for all)"'
+env = { AWS_PROFILE = "dev" }
 run = 'pnpm run cdk deploy ${usage_stacks:-"**"}'
 
 [tasks.pin]

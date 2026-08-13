@@ -8,10 +8,6 @@ import { SharedKmsKeyStack } from '../infrastructure/shared-kms-key-stack';
 import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty';
 import { BRONZE_TABLES } from '../infrastructure/schemas';
 import { FoerderturmStack } from '../infrastructure/foerderturm-stack';
-import {
-  type ConnectorDefinition,
-  FoerderturmConnectorsStack,
-} from '../infrastructure/foerderturm-connectors-stack';
 import { devAccount, stageAccount, prodAccount } from '../config/constants';
 import { type ContainerArtifact, getImageArtifact } from '../config/version-manifest';
 
@@ -48,7 +44,7 @@ export class EnvironmentStage extends cdk.Stage {
 
     cdk.Aspects.of(this).add(new AwsSolutionsChecks({ verbose: true }));
 
-    new SnsPagerDutyStack(this, 'SnsPagerDuty', {
+    const snsPagerDuty = new SnsPagerDutyStack(this, 'SnsPagerDuty', {
       topicName: `PagerDutyAlerts${id}`,
       emailAddress: props.pagerDutyEmail,
       env: { account: props.accountId, region: props.awsRegion },
@@ -120,66 +116,50 @@ export class EnvironmentStage extends cdk.Stage {
       // TODO: Eventually add ServiceEncryptionKey which not encrypt data related to services.
       // Currently not done to reduce complexity & KMS cost
 
-      // foerderturm Dagster orchestrator. desiredCount=0 keeps dev/staging off by default.
+      // foerderturm Dagster orchestrator. The service's desired count is NOT set here - it is owned
+      // at runtime by FoerderturmLifecycle (see the note on the ECS service in FoerderturmStack).
+      const dailyStart = { cron: 'cron(30 10 ? * MON-FRI *)' };
+      const scheduledLifecycle = { startSchedule: dailyStart, minSessionMinutes: 60 };
       const foerderturmConfig = {
-        [devAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-dev' },
-        [stageAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-stage' },
-        [prodAccount]: { desiredCount: 0, tailscaleHostname: 'foerderturm-prod' }, // TODO: Set desiredCount to 1 when production is fully running
+        [devAccount]: { tailscaleHostname: 'foerderturm-dev', lifecycle: {} },
+        [stageAccount]: {
+          tailscaleHostname: 'foerderturm-stage',
+          lifecycle: scheduledLifecycle,
+        },
+        [prodAccount]: {
+          tailscaleHostname: 'foerderturm-prod',
+          lifecycle: scheduledLifecycle,
+        },
       }[props.accountId];
 
       if (foerderturmConfig) {
         const foerderturmImage = (artifactName: string): ContainerArtifact =>
           getImageArtifact('foerderturm', artifactName);
 
-        const foerderturm = new FoerderturmStack(this, 'Foerderturm', {
+        // SSM SecureString holding the Massive API key; create it manually before deploying.
+        // The Massive worker (running in-op in its run-worker task) resolves it at runtime.
+        const massiveApiKeyParam = `/foerderturm-${props.environment}/massive/api-key`;
+
+        // foerderturm Dagster orchestrator. Every run executes in-op inside its worker's own
+        // run-worker image (migration plan Phase 5) launched by the EcsRunLauncher - there is no
+        // separate connectors (Lambda/Pipes) data-plane stack anymore; the per-worker task role
+        // carries the bronze/staging/SSM data-plane grants.
+        new FoerderturmStack(this, 'Foerderturm', {
           environment: props.environment,
           dagsterImageArtifact: foerderturmImage('dagster'),
-          litestreamImageArtifact: foerderturmImage('litestream'),
           tailscaleImageArtifact: foerderturmImage('tailscale'),
-          desiredCount: foerderturmConfig.desiredCount,
+          bronze,
+          workers: {
+            massive: {
+              image: foerderturmImage('connector-massive-worker'),
+              ssmSecureParams: { MASSIVE_API_KEY_SSM_PARAMETER: massiveApiKeyParam },
+            },
+            sharadar: { image: foerderturmImage('connector-sharadar-worker') },
+            example: { image: foerderturmImage('connector-example-worker') },
+          },
           tailscaleHostname: foerderturmConfig.tailscaleHostname,
-          env: { account: props.accountId, region: props.awsRegion },
-        });
-
-        // Connector Lambdas (data plane).
-        const connectors: ConnectorDefinition[] = [
-          {
-            vendor: 'example',
-            imageArtifact: foerderturmImage('connector-example-lambda-container'),
-            enabledInstrumentations: ['threading'],
-          },
-          {
-            vendor: 'sharadar',
-            imageArtifact: foerderturmImage('connector-sharadar-lambda-container'),
-            tableNamespace: bronze,
-            memoryMiB: 2048,
-            stagingBucket: foerderturm.sharadarStagingBucket,
-            enabledInstrumentations: ['threading'],
-          },
-        ];
-
-        // Massive connector
-        // Create this parameter manually before deploying to the environment(s)
-        const massiveApiKeyParam = `/foerderturm-${props.environment}/massive/api-key`;
-        connectors.push({
-          vendor: 'massive',
-          imageArtifact: foerderturmImage('connector-massive-lambda-container'),
-          tableNamespace: bronze,
-          memoryMiB: 2048,
-          // Massive is an async aiohttp client; instrument the HTTP calls and the asyncio loop.
-          enabledInstrumentations: ['aiohttp-client', 'asyncio', 'threading'],
-          secretParameterNames: [massiveApiKeyParam],
-          environmentVars: { MASSIVE_API_KEY_SSM_PARAMETER: massiveApiKeyParam },
-          ecsConfig: {
-            imageArtifact: foerderturmImage('connector-massive-ecs-container'),
-            memoryMiB: 2048,
-          },
-        });
-
-        new FoerderturmConnectorsStack(this, 'FoerderturmConnectors', {
-          environment: props.environment,
-          connectors,
-          pipesMessagesBucket: foerderturm.pipesMessagesBucket,
+          lifecycle: foerderturmConfig.lifecycle,
+          alertTopic: snsPagerDuty.topic,
           env: { account: props.accountId, region: props.awsRegion },
         });
       }

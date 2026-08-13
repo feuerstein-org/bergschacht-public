@@ -1,17 +1,14 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template, Match } from 'aws-cdk-lib/assertions';
+import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import { FoerderturmStack } from '../../lib/infrastructure/foerderturm-stack';
+import type { FoerderturmLifecycleConfig } from '../../lib/infrastructure/foerderturm-lifecycle';
+import type { BronzeTableNamespace } from '../../lib/infrastructure/table-access';
 
 const TEST_IMAGE_ARTIFACT = {
   repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',
   imageTag: 'foerderturm-foerderturm-0.1.0',
-  version: '0.1.0',
-  commitSha: 'abcdef1234567',
-};
-
-const TEST_LITESTREAM_IMAGE_ARTIFACT = {
-  repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',
-  imageTag: 'foerderturm-foerderturm-litestream-0.1.0',
   version: '0.1.0',
   commitSha: 'abcdef1234567',
 };
@@ -23,21 +20,92 @@ const TEST_TAILSCALE_IMAGE_ARTIFACT = {
   commitSha: 'abcdef1234567',
 };
 
+/** Run-worker images, keyed by the `worker` run-tag value. */
+const TEST_RUNWORKER_IMAGES = {
+  massive: {
+    repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',
+    imageTag: 'foerderturm-connector-massive-worker-0.3.0',
+    version: '0.3.0',
+    commitSha: 'abcdef1234567',
+  },
+  sharadar: {
+    repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',
+    imageTag: 'foerderturm-connector-sharadar-worker-0.2.0',
+    version: '0.2.0',
+    commitSha: 'abcdef1234567',
+  },
+  example: {
+    repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',
+    imageTag: 'foerderturm-connector-example-worker-0.3.0',
+    version: '0.3.0',
+    commitSha: 'abcdef1234567',
+  },
+};
+
+const BRONZE_BUCKET_ARN = 'arn:aws:s3tables:us-east-1:123456789012:bucket/example-erzlager-test';
+const MASSIVE_API_KEY_PARAM = '/foerderturm-test/massive/api-key';
+
+/** Run-worker profiles: image, secrets, per-worker env, and Fargate size. */
+const TEST_WORKERS = {
+  massive: {
+    image: TEST_RUNWORKER_IMAGES.massive,
+    ssmSecureParams: { MASSIVE_API_KEY_SSM_PARAMETER: MASSIVE_API_KEY_PARAM },
+    environmentVars: { OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: 'urllib3' },
+  },
+  // Sharadar's corporate-actions ingest is memory-hungry, so give it a bigger default size.
+  sharadar: { image: TEST_RUNWORKER_IMAGES.sharadar, cpu: 2048, memoryMiB: 8192 },
+  example: { image: TEST_RUNWORKER_IMAGES.example },
+};
+
 /** Match the synthesized container Image (an `Fn::Join` token) by its image tag. */
 const imageWithTag = (tag: string): unknown => ({
   'Fn::Join': Match.arrayWith([Match.arrayWith([Match.stringLikeRegexp(tag)])]),
 });
 
-/** Instantiate a `FoerderturmStack` with shared test image artifacts. */
-function createTestStack(opts: { desiredCount?: number }): FoerderturmStack {
+/** Build a bronze S3 Tables namespace fixture (imported by ARN, so grants are literal). */
+function bronzeFixture(app: cdk.App): BronzeTableNamespace {
+  const fixtures = new cdk.Stack(app, 'Fixtures');
+  const tableBucket = s3tables.TableBucket.fromTableBucketArn(
+    fixtures,
+    'BronzeBucket',
+    BRONZE_BUCKET_ARN
+  );
+  return {
+    namespaceName: 'bronze',
+    tableBucket,
+    tables: new Map([
+      ['security_master', { tableArn: `${BRONZE_BUCKET_ARN}/table/00000000-0000-0000-0000-sm` }],
+      ['fact_daily_ohlcv', { tableArn: `${BRONZE_BUCKET_ARN}/table/00000000-0000-0000-0000-oh` }],
+    ]),
+  };
+}
+
+/** Imported alert topic from a separate stack, so the lifecycle alarms have a target to point at. */
+function alertTopicFixture(app: cdk.App): sns.ITopic {
+  const fixtures = new cdk.Stack(app, 'AlertFixtures');
+  return sns.Topic.fromTopicArn(
+    fixtures,
+    'AlertTopic',
+    'arn:aws:sns:us-east-1:123456789012:PagerDutyAlertsTest'
+  );
+}
+
+/** Instantiate a `FoerderturmStack` with shared test image artifacts, manual-only lifecycle by default. */
+function createTestStack(
+  opts: {
+    readonly lifecycle?: FoerderturmLifecycleConfig;
+  } = {}
+): FoerderturmStack {
   const app = new cdk.App();
   return new FoerderturmStack(app, 'TestFoerderturm', {
     environment: 'test',
     dagsterImageArtifact: TEST_IMAGE_ARTIFACT,
-    litestreamImageArtifact: TEST_LITESTREAM_IMAGE_ARTIFACT,
     tailscaleImageArtifact: TEST_TAILSCALE_IMAGE_ARTIFACT,
-    desiredCount: opts.desiredCount ?? 1,
+    bronze: bronzeFixture(app),
+    workers: TEST_WORKERS,
     tailscaleHostname: 'foerderturm-test',
+    lifecycle: opts.lifecycle ?? {},
+    alertTopic: alertTopicFixture(app),
   });
 }
 
@@ -50,65 +118,62 @@ describe('FoerderturmStack', () => {
     template = Template.fromStack(stack);
   });
 
-  test('creates a VPC with public subnets only and no NAT gateways', () => {
+  test('creates a VPC with public + isolated-DB subnets and no NAT gateways', () => {
     template.resourceCountIs('AWS::EC2::VPC', 1);
     template.resourceCountIs('AWS::EC2::NatGateway', 0);
-    template.allResources('AWS::EC2::Subnet', {
-      Properties: Match.objectLike({ MapPublicIpOnLaunch: true }),
+    // Public subnets (orchestrator + run-worker tasks) map public IPs; the PRIVATE_ISOLATED DB
+    // subnets do not. No NAT either way (isolated subnets need none).
+    const subnets = template.findResources('AWS::EC2::Subnet');
+    const mapsPublicIp = Object.values(subnets).map(
+      (s) => s.Properties.MapPublicIpOnLaunch === true
+    );
+    expect(mapsPublicIp.filter((v) => v).length).toBe(2);
+    expect(mapsPublicIp.filter((v) => !v).length).toBe(2);
+  });
+
+  test('creates a single-AZ encrypted db.t4g.micro Postgres instance with a generated secret', () => {
+    template.resourceCountIs('AWS::RDS::DBInstance', 1);
+    template.hasResourceProperties('AWS::RDS::DBInstance', {
+      Engine: 'postgres',
+      EngineVersion: '18.3',
+      DBInstanceClass: 'db.t4g.micro',
+      MultiAZ: false,
+      AllocatedStorage: '20',
+      StorageType: 'gp3',
+      StorageEncrypted: true,
+      DBName: 'dagster',
+      PubliclyAccessible: false,
+      MasterUsername: 'dagster',
+      MasterUserPassword: {
+        'Fn::Join': Match.arrayWith([Match.arrayWith([Match.stringLikeRegexp('SecretString')])]),
+      },
+    });
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'foerderturm-test/dagster/db',
     });
   });
 
-  test('creates a Litestream S3 bucket with KMS encryption and versioning', () => {
-    // litestream + pipes-messages + sharadar-staging + tailscale-state file system bucket
-    template.resourceCountIs('AWS::S3::Bucket', 4);
-    template.hasResourceProperties('AWS::S3::Bucket', {
-      VersioningConfiguration: { Status: 'Enabled' },
-      BucketEncryption: {
-        ServerSideEncryptionConfiguration: [
-          Match.objectLike({
-            BucketKeyEnabled: true,
-            ServerSideEncryptionByDefault: { SSEAlgorithm: 'aws:kms' },
-          }),
-        ],
-      },
-      PublicAccessBlockConfiguration: {
-        BlockPublicAcls: true,
-        BlockPublicPolicy: true,
-        IgnorePublicAcls: true,
-        RestrictPublicBuckets: true,
-      },
+  test('allows Postgres (5432) ingress from the orchestrator and run-worker task SGs', () => {
+    const ingress5432 = template.findResources('AWS::EC2::SecurityGroupIngress', {
+      Properties: Match.objectLike({ IpProtocol: 'tcp', FromPort: 5432, ToPort: 5432 }),
     });
+    expect(Object.keys(ingress5432).length).toBe(2);
   });
 
-  test('creates a transient Pipes messages bucket with S3-managed encryption and a 1-day expiry', () => {
-    template.hasResourceProperties('AWS::S3::Bucket', {
-      BucketEncryption: {
-        ServerSideEncryptionConfiguration: [
-          Match.objectLike({
-            ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' },
-          }),
-        ],
-      },
-      PublicAccessBlockConfiguration: {
-        BlockPublicAcls: true,
-        BlockPublicPolicy: true,
-        IgnorePublicAcls: true,
-        RestrictPublicBuckets: true,
-      },
-      LifecycleConfiguration: {
-        Rules: Match.arrayWith([
-          Match.objectLike({
-            Id: 'ExpirePipesMessages',
-            Status: 'Enabled',
-            ExpirationInDays: 1,
-          }),
-          Match.objectLike({
-            Id: 'AbortIncompleteMultipartUpload',
-            Status: 'Enabled',
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
-          }),
-        ]),
-      },
+  test('injects the Postgres credentials into the dagster containers as secrets', () => {
+    const pgSecrets = Match.arrayWith([
+      Match.objectLike({ Name: 'DAGSTER_PG_HOST' }),
+      Match.objectLike({ Name: 'DAGSTER_PG_PORT' }),
+      Match.objectLike({ Name: 'DAGSTER_PG_USERNAME' }),
+      Match.objectLike({ Name: 'DAGSTER_PG_PASSWORD' }),
+      Match.objectLike({ Name: 'DAGSTER_PG_DB' }),
+    ]);
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: Match.arrayWith([
+        Match.objectLike({ Name: 'dagster-init', Secrets: pgSecrets }),
+        Match.objectLike({ Name: 'dagster-webserver', Secrets: pgSecrets }),
+        Match.objectLike({ Name: 'dagster-daemon', Secrets: pgSecrets }),
+      ]),
     });
   });
 
@@ -157,7 +222,7 @@ describe('FoerderturmStack', () => {
     });
   });
 
-  test('creates a Fargate task definition with the dagster-home volume and all six containers', () => {
+  test('creates a Fargate task definition with the three dagster containers + tailscale', () => {
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       Cpu: '512',
       Memory: '2048',
@@ -166,39 +231,13 @@ describe('FoerderturmStack', () => {
         CpuArchitecture: 'X86_64',
         OperatingSystemFamily: 'LINUX',
       },
-      Volumes: Match.arrayWith([Match.objectLike({ Name: 'dagster-home' })]),
       ContainerDefinitions: Match.arrayWith([
-        // (1) litestream-restore: init, non-essential. Uses the ECR-baked Litestream image
-        Match.objectLike({
-          Name: 'litestream-restore',
-          Image: imageWithTag(TEST_LITESTREAM_IMAGE_ARTIFACT.imageTag),
-          Essential: false,
-          EntryPoint: ['/bin/sh', '-c'],
-          Command: [
-            Match.stringLikeRegexp(
-              'litestream restore .*runs\\.db.*event_log\\.db.*schedules\\.db.*chown -R 1000:1000'
-            ),
-          ],
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'LITESTREAM_BUCKET' }),
-            Match.objectLike({ Name: 'LITESTREAM_SYNC_INTERVAL' }),
-          ]),
-          MountPoints: Match.arrayWith([
-            Match.objectLike({ SourceVolume: 'dagster-home', ContainerPath: '/app/dagster_home' }),
-          ]),
-        }),
-        // (2) dagster-init: init, non-essential, runs alembic migrate to avoid webserver/daemon race.
         Match.objectLike({
           Name: 'dagster-init',
           Image: imageWithTag(TEST_IMAGE_ARTIFACT.imageTag),
           Essential: false,
-          EntryPoint: ['/bin/sh', '-c'],
-          Command: [Match.stringLikeRegexp('exec dagster instance migrate')],
-          DependsOn: Match.arrayWith([
-            Match.objectLike({ ContainerName: 'litestream-restore', Condition: 'SUCCESS' }),
-          ]),
+          Command: ['dagster', 'instance', 'migrate'],
         }),
-        // (3) dagster-webserver: serves :3000, depends on dagster-init SUCCESS. No shell wrapper.
         Match.objectLike({
           Name: 'dagster-webserver',
           Image: imageWithTag(TEST_IMAGE_ARTIFACT.imageTag),
@@ -215,14 +254,10 @@ describe('FoerderturmStack', () => {
           PortMappings: Match.arrayWith([
             Match.objectLike({ ContainerPort: 3000, Protocol: 'tcp' }),
           ]),
-          MountPoints: Match.arrayWith([
-            Match.objectLike({ SourceVolume: 'dagster-home', ContainerPath: '/app/dagster_home' }),
-          ]),
           DependsOn: Match.arrayWith([
             Match.objectLike({ ContainerName: 'dagster-init', Condition: 'SUCCESS' }),
           ]),
         }),
-        // (4) dagster-daemon: daemon command, depends on dagster-init SUCCESS.
         Match.objectLike({
           Name: 'dagster-daemon',
           Image: imageWithTag(TEST_IMAGE_ARTIFACT.imageTag),
@@ -232,21 +267,6 @@ describe('FoerderturmStack', () => {
             Match.objectLike({ ContainerName: 'dagster-init', Condition: 'SUCCESS' }),
           ]),
         }),
-        // (5) litestream sidecar
-        Match.objectLike({
-          Name: 'litestream',
-          Image: imageWithTag(TEST_LITESTREAM_IMAGE_ARTIFACT.imageTag),
-          Essential: true,
-          Command: ['replicate', '-config', '/etc/litestream.yml'],
-          Environment: Match.arrayWith([
-            Match.objectLike({ Name: 'LITESTREAM_BUCKET' }),
-            Match.objectLike({ Name: 'LITESTREAM_SYNC_INTERVAL' }),
-          ]),
-          DependsOn: Match.arrayWith([
-            Match.objectLike({ ContainerName: 'dagster-init', Condition: 'SUCCESS' }),
-          ]),
-        }),
-        // (6) tailscale sidecar
         Match.objectLike({
           Name: 'tailscale',
           Image: imageWithTag(TEST_TAILSCALE_IMAGE_ARTIFACT.imageTag),
@@ -277,39 +297,20 @@ describe('FoerderturmStack', () => {
     });
   });
 
-  test('injects the Pipes bucket name and connector Lambda name into the dagster containers', () => {
-    const pipesEnv = Match.arrayWith([
-      Match.objectLike({ Name: 'PIPES_MESSAGES_BUCKET' }),
-      { Name: 'CONNECTOR_EXAMPLE_LAMBDA_NAME', Value: 'foerderturm-connector-example-test' },
-      { Name: 'CONNECTOR_SHARADAR_LAMBDA_NAME', Value: 'foerderturm-connector-sharadar-test' },
-      Match.objectLike({
-        Name: 'SHARADAR_STAGING_BUCKET',
-        Value: { Ref: Match.stringLikeRegexp('SharadarStagingBucket') },
-      }),
+  test('injects the SHARED run-worker runtime config into the dagster containers', () => {
+    // Only the truly shared config is a standalone container env var now: the S3 Tables warehouse ARN and the per-env OTEL attributes.
+    const runtimeEnv = Match.arrayWith([
+      { Name: 'TABLE_BUCKET_ARN', Value: BRONZE_BUCKET_ARN },
+      {
+        Name: 'OTEL_RESOURCE_ATTRIBUTES',
+        Value: 'service.namespace=foerderturm,deployment.environment.name=test',
+      },
     ]);
     template.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({ Name: 'dagster-webserver', Environment: pipesEnv }),
-        Match.objectLike({ Name: 'dagster-daemon', Environment: pipesEnv }),
+        Match.objectLike({ Name: 'dagster-webserver', Environment: runtimeEnv }),
+        Match.objectLike({ Name: 'dagster-daemon', Environment: runtimeEnv }),
       ]),
-    });
-  });
-
-  test('grants the task role invoke scoped to the connector Lambda name prefix', () => {
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Effect: 'Allow',
-            Action: 'lambda:InvokeFunction',
-            Resource: {
-              'Fn::Join': Match.arrayWith([
-                Match.arrayWith([Match.stringLikeRegexp('function:foerderturm-connector-\\*')]),
-              ]),
-            },
-          }),
-        ]),
-      },
     });
   });
 
@@ -321,60 +322,13 @@ describe('FoerderturmStack', () => {
     });
   });
 
-  test('creates an egress-only security group for connector backfill tasks', () => {
+  test('creates an egress-only security group for the run-worker tasks', () => {
     template.hasResourceProperties('AWS::EC2::SecurityGroup', {
-      GroupDescription: Match.stringLikeRegexp('connector ECS tasks'),
+      GroupDescription: Match.stringLikeRegexp('run-worker ECS tasks'),
     });
   });
 
-  test('injects the connector ECS launch parameters into the dagster containers', () => {
-    const ecsEnv = Match.arrayWith([
-      { Name: 'CONNECTOR_ECS_CLUSTER', Value: 'foerderturm-workers-test' },
-      Match.objectLike({ Name: 'CONNECTOR_ECS_SUBNETS' }),
-      Match.objectLike({ Name: 'CONNECTOR_ECS_SECURITY_GROUP' }),
-      {
-        Name: 'CONNECTOR_EXAMPLE_ECS_TASK_FAMILY',
-        Value: 'foerderturm-connector-example-ecs-test',
-      },
-      {
-        Name: 'CONNECTOR_MASSIVE_ECS_TASK_FAMILY',
-        Value: 'foerderturm-connector-massive-ecs-test',
-      },
-    ]);
-    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
-      ContainerDefinitions: Match.arrayWith([
-        Match.objectLike({ Name: 'dagster-webserver', Environment: ecsEnv }),
-        Match.objectLike({ Name: 'dagster-daemon', Environment: ecsEnv }),
-      ]),
-    });
-  });
-
-  test('grants the task role RunTask scoped to connector task definitions on the workers cluster', () => {
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Effect: 'Allow',
-            Action: 'ecs:RunTask',
-            Resource: {
-              'Fn::Join': Match.arrayWith([
-                Match.arrayWith([
-                  Match.stringLikeRegexp('task-definition/foerderturm-connector-\\*'),
-                ]),
-              ]),
-            },
-            Condition: {
-              ArnEquals: {
-                'ecs:cluster': { 'Fn::GetAtt': [Match.stringLikeRegexp('WorkersCluster'), 'Arn'] },
-              },
-            },
-          }),
-        ]),
-      },
-    });
-  });
-
-  test('grants the task role task tracking and PassRole restricted to ECS tasks', () => {
+  test('grants the orchestrator DescribeTasks/StopTask/TagResource on the workers cluster tasks', () => {
     template.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: {
         Statement: Match.arrayWith([
@@ -386,57 +340,212 @@ describe('FoerderturmStack', () => {
               ]),
             },
           }),
-          Match.objectLike({
-            Action: 'iam:PassRole',
-            Resource: {
-              'Fn::Join': Match.arrayWith([
-                Match.arrayWith([Match.stringLikeRegexp('role/foerderturm-connector-\\*')]),
-              ]),
-            },
-            Condition: {
-              StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' },
-            },
-          }),
         ]),
       },
+      Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('TaskDefinitionTaskRole') }]),
     });
   });
 
-  test('grants the task role read access to the Pipes messages bucket', () => {
-    // grantRead emits exactly these three actions, which distinguishes it from the litestream
-    // grantReadWrite (which also includes Put*/Delete*).
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
+  describe('run-worker launcher (EcsRunLauncher, Phase 3/5)', () => {
+    test('creates a deterministic run-worker execution role trusting ECS tasks', () => {
+      const assumedByEcs = {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Effect: 'Allow',
-            Action: ['s3:GetObject*', 's3:GetBucket*', 's3:List*'],
+            Action: 'sts:AssumeRole',
+            Principal: { Service: 'ecs-tasks.amazonaws.com' },
           }),
         ]),
-      },
+      };
+      // Only the execution role has a deterministic name; there is no base task role (dagster.yaml
+      // omits task_definition.task_role_arn), and the per-worker task roles use generated names.
+      template.hasResourceProperties('AWS::IAM::Role', {
+        RoleName: 'foerderturm-runworker-exec-test',
+        AssumeRolePolicyDocument: assumedByEcs,
+        ManagedPolicyArns: Match.arrayWith([
+          {
+            'Fn::Join': Match.arrayWith([
+              Match.arrayWith([Match.stringLikeRegexp('AmazonECSTaskExecutionRolePolicy')]),
+            ]),
+          },
+        ]),
+      });
     });
-  });
 
-  test('grants the task role read/write access to exactly one litestream bucket', () => {
-    template.resourcePropertiesCountIs(
-      'AWS::IAM::Policy',
-      {
+    test('creates a retained run-worker log group with 30-day retention', () => {
+      template.hasResourceProperties('AWS::Logs::LogGroup', {
+        LogGroupName: '/ecs/foerderturm-runworker-test',
+        RetentionInDays: 30,
+      });
+    });
+
+    test('injects the RUN_WORKER_* launcher config, with the per-worker RUN_WORKER_PROFILES map', () => {
+      // RUN_WORKER_PROFILES is toJsonString of {name: {image, task_role_arn, env}}; because the
+      // role ARNs (and Sharadar's staging bucket name) are CFN tokens the value synthesizes to an
+      // Fn::Join, so match its presence rather than a literal string.
+      const rwEnv = Match.arrayWith([
+        { Name: 'RUN_WORKER_CLUSTER', Value: 'foerderturm-workers-test' },
+        Match.objectLike({ Name: 'RUN_WORKER_SUBNETS' }),
+        Match.objectLike({ Name: 'RUN_WORKER_SECURITY_GROUP' }),
+        Match.objectLike({ Name: 'RUN_WORKER_LOG_GROUP' }),
+        Match.objectLike({ Name: 'RUN_WORKER_EXECUTION_ROLE_ARN' }),
+        Match.objectLike({ Name: 'RUN_WORKER_DB_SECRET_ARN' }),
+        Match.objectLike({ Name: 'RUN_WORKER_PROFILES' }),
+      ]);
+      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+        ContainerDefinitions: Match.arrayWith([
+          Match.objectLike({ Name: 'dagster-webserver', Environment: rwEnv }),
+          Match.objectLike({ Name: 'dagster-daemon', Environment: rwEnv }),
+        ]),
+      });
+      // The per-worker images travel inside that JSON: assert each image tag appears in the
+      // synthesized Fn::Join fragments for the RUN_WORKER_PROFILES value.
+      const taskDefs = template.findResources('AWS::ECS::TaskDefinition');
+      const containers = Object.values(taskDefs)[0]!.Properties.ContainerDefinitions as {
+        Name: string;
+        Environment?: { Name: string; Value: unknown }[];
+      }[];
+      const daemon = containers.find((c) => c.Name === 'dagster-daemon')!;
+      const workersVar = (daemon.Environment ?? []).find((e) => e.Name === 'RUN_WORKER_PROFILES');
+      const asText = JSON.stringify(workersVar!.Value);
+      expect(asText).toContain(TEST_RUNWORKER_IMAGES.massive.imageTag);
+      expect(asText).toContain(TEST_RUNWORKER_IMAGES.sharadar.imageTag);
+      expect(asText).toContain(TEST_RUNWORKER_IMAGES.example.imageTag);
+      expect(asText).toContain('MASSIVE_API_KEY_SSM_PARAMETER');
+      // Per-worker env + Fargate size ride in the same JSON.
+      expect(asText).toContain('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS');
+      expect(asText).toContain('2048'); // sharadar cpu
+      expect(asText).toContain('8192'); // sharadar memory
+    });
+
+    test('grants the orchestrator RegisterTaskDefinition/DescribeTaskDefinition + RunTask on the run-worker family prefix', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
         PolicyDocument: {
           Statement: Match.arrayWith([
             Match.objectLike({
-              Effect: 'Allow',
-              Action: Match.arrayWith(['s3:PutObject']),
+              Action: ['ecs:RegisterTaskDefinition', 'ecs:DescribeTaskDefinition'],
+              Resource: '*',
+            }),
+            Match.objectLike({
+              Action: 'ecs:RunTask',
+              Resource: {
+                'Fn::Join': Match.arrayWith([
+                  Match.arrayWith([Match.stringLikeRegexp('task-definition/run-worker_\\*')]),
+                ]),
+              },
+              Condition: {
+                ArnEquals: {
+                  'ecs:cluster': {
+                    'Fn::GetAtt': [Match.stringLikeRegexp('WorkersCluster'), 'Arn'],
+                  },
+                },
+              },
             }),
           ]),
         },
-      },
-      1
-    );
+        Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('TaskDefinitionTaskRole') }]),
+      });
+    });
+
+    test('grants the orchestrator iam:PassRole to the shared exec role + every per-worker role', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: 'iam:PassRole',
+              Resource: Match.arrayWith([
+                { 'Fn::GetAtt': [Match.stringLikeRegexp('RunWorkerExecRole'), 'Arn'] },
+                // A per-worker task role is passable too (each run gets its worker's own role).
+                { 'Fn::GetAtt': [Match.stringLikeRegexp('RunWorkerMassiveTaskRole'), 'Arn'] },
+              ]),
+              Condition: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
+            }),
+          ]),
+        },
+        Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('TaskDefinitionTaskRole') }]),
+      });
+    });
+
+    test('scopes bronze/staging/Massive-key grants to the per-worker run-worker roles', () => {
+      // Bronze S3 Tables write lives on each per-worker role (in-op ingest writes bronze directly);
+      // there is no shared/base role carrying it.
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({ Action: Match.arrayWith(['s3tables:PutTableData']) }),
+          ]),
+        },
+        Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('RunWorkerMassiveTaskRole') }]),
+      });
+      // Massive API-key SSM read is scoped to the MASSIVE worker's own role.
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(['ssm:GetParameter']),
+              Resource: {
+                'Fn::Join': Match.arrayWith([
+                  Match.arrayWith([Match.stringLikeRegexp('foerderturm-test/massive/api-key')]),
+                ]),
+              },
+            }),
+          ]),
+        },
+        Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('RunWorkerMassiveTaskRole') }]),
+      });
+      // Sharadar staging-bucket read is scoped to the SHARADAR worker's own role.
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(['s3:GetObject*']),
+              Resource: Match.arrayWith([
+                { 'Fn::GetAtt': [Match.stringLikeRegexp('SharadarStagingBucket'), 'Arn'] },
+              ]),
+            }),
+          ]),
+        },
+        Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('RunWorkerSharadarTaskRole') }]),
+      });
+    });
+
+    test('the Massive worker role does NOT get the Sharadar staging-bucket read (least privilege)', () => {
+      // Find the policy attached to the Massive role and assert it has no s3:GetObject on the bucket.
+      const policies = template.findResources('AWS::IAM::Policy');
+      const massivePolicies = Object.values(policies).filter((p) =>
+        JSON.stringify(p.Properties.Roles ?? '').includes('RunWorkerMassiveTaskRole')
+      );
+      const asText = JSON.stringify(massivePolicies);
+      expect(asText).not.toContain('SharadarStagingBucket');
+    });
+
+    test('attaches CloudWatchAgentServerPolicy to the per-worker roles', () => {
+      // The App Signals sidecar authenticates as the role the run-worker TASK runs under - always a
+      // per-worker role (the launcher overlays it). So cwagent belongs on the per-worker roles.
+      const roles = template.findResources('AWS::IAM::Role');
+      const cwagentRoles = Object.values(roles).filter((r) =>
+        JSON.stringify(r.Properties.ManagedPolicyArns ?? '').includes('CloudWatchAgentServerPolicy')
+      );
+      // massive, sharadar, example - one per worker.
+      expect(cwagentRoles).toHaveLength(3);
+    });
+
+    test('grants the run-worker execution role read on the Dagster DB secret', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(['secretsmanager:GetSecretValue']),
+              Resource: { Ref: Match.stringLikeRegexp('DatabaseSecret') },
+            }),
+          ]),
+        },
+        Roles: Match.arrayWith([{ Ref: Match.stringLikeRegexp('RunWorkerExecRole') }]),
+      });
+    });
   });
 
-  test('creates an ECS service with the requested desiredCount and stop-then-start deployment', () => {
+  test('creates an ECS service with stop-then-start deployment', () => {
     template.hasResourceProperties('AWS::ECS::Service', {
-      DesiredCount: 1,
       LaunchType: 'FARGATE',
       DeploymentConfiguration: {
         MinimumHealthyPercent: 0,
@@ -472,8 +581,8 @@ describe('FoerderturmStack', () => {
   test('creates CloudFormation outputs', () => {
     template.hasOutput('ServiceName', {});
     template.hasOutput('ClusterName', {});
-    template.hasOutput('LitestreamBucketName', {});
-    template.hasOutput('PipesMessagesBucketName', {});
+    template.hasOutput('DatabaseEndpoint', {});
+    template.hasOutput('DatabaseSecretName', {});
     template.hasOutput('TailscaleSecretName', {});
     template.hasOutput('TailscaleStateFileSystemId', {});
     template.hasOutput('TailscaleHostname', {});
@@ -498,7 +607,6 @@ describe('FoerderturmStack', () => {
       template.resourceCountIs('AWS::S3Files::FileSystem', 1);
       template.hasResourceProperties('AWS::S3Files::FileSystem', {
         AcceptBucketWarning: true,
-        // The CFN schema requires the bucket ARN (not the name) — must render as GetAtt …Arn.
         Bucket: { 'Fn::GetAtt': [Match.stringLikeRegexp('TailscaleStateBucket'), 'Arn'] },
         RoleArn: { 'Fn::GetAtt': [Match.stringLikeRegexp('TailscaleStateFsRole'), 'Arn'] },
       });
@@ -519,8 +627,6 @@ describe('FoerderturmStack', () => {
     });
 
     test('grants the file system service role bucket-sync + EventBridge permissions', () => {
-      // S3 Files (as the service) must list the bucket, read/write its objects, and manage the
-      // EventBridge rules it uses to detect bucket changes.
       template.hasResourceProperties('AWS::IAM::Policy', {
         PolicyDocument: {
           Statement: Match.arrayWith([
@@ -572,7 +678,6 @@ describe('FoerderturmStack', () => {
     });
 
     test('creates a mount target per public subnet', () => {
-      // The env-less test stack resolves to 2 dummy AZs -> 2 public subnets -> 2 mount targets.
       template.resourceCountIs('AWS::S3Files::MountTarget', 2);
     });
 
@@ -603,15 +708,19 @@ describe('FoerderturmStack', () => {
       });
     });
 
-    test('grants the task role the S3 Files client managed policy', () => {
-      template.hasResourceProperties('AWS::IAM::Role', {
-        ManagedPolicyArns: Match.arrayWith([
-          {
-            'Fn::Join': Match.arrayWith([
-              Match.arrayWith([Match.stringLikeRegexp('AmazonS3FilesClientFullAccess')]),
-            ]),
-          },
-        ]),
+    test('grants the task role S3 Files client access scoped to the Tailscale state FS', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Effect: 'Allow',
+              Action: ['s3files:ClientMount', 's3files:ClientWrite', 's3files:ClientRootAccess'],
+              Resource: Match.objectLike({
+                'Fn::GetAtt': Match.arrayWith([Match.stringLikeRegexp('TailscaleStateFileSystem')]),
+              }),
+            }),
+          ]),
+        }),
       });
     });
 
@@ -628,19 +737,44 @@ describe('FoerderturmStack', () => {
     expect(stack.service).toBeDefined();
     expect(stack.cluster).toBeDefined();
     expect(stack.vpc).toBeDefined();
-    expect(stack.litestreamBucket).toBeDefined();
-    expect(stack.pipesMessagesBucket).toBeDefined();
+    expect(stack.database).toBeDefined();
+    expect(stack.databaseSecret).toBeDefined();
     expect(stack.tailscaleSecret).toBeDefined();
   });
 
-  describe('with desiredCount=0 (stopped)', () => {
-    test('the service is deployed with zero tasks', () => {
-      const stoppedStack = createTestStack({
-        desiredCount: 0,
-      });
-      const stoppedTemplate = Template.fromStack(stoppedStack);
-      stoppedTemplate.hasResourceProperties('AWS::ECS::Service', {
-        DesiredCount: 0,
+  test('omits DesiredCount so deploys never fight the lifecycle state machines', () => {
+    const services = template.findResources('AWS::ECS::Service');
+    expect(Object.keys(services)).toHaveLength(1);
+    for (const service of Object.values(services)) {
+      expect(service.Properties).not.toHaveProperty('DesiredCount');
+    }
+  });
+
+  test('subscribes maintenance events to the alert topic', () => {
+    template.hasResourceProperties('AWS::RDS::EventSubscription', {
+      SourceType: 'db-instance',
+      EventCategories: ['maintenance', 'security patching'],
+      SnsTopicArn: 'arn:aws:sns:us-east-1:123456789012:PagerDutyAlertsTest',
+      Enabled: true,
+    });
+  });
+
+  describe('lifecycle', () => {
+    test('is always created', () => {
+      template.resourceCountIs('AWS::StepFunctions::StateMachine', 3);
+      template.resourceCountIs('AWS::DynamoDB::GlobalTable', 1);
+    });
+
+    test('adds a start schedule only when one is configured', () => {
+      // dev deploys `{}` and comes up only when someone starts it by hand.
+      template.resourceCountIs('AWS::Scheduler::Schedule', 1);
+
+      const scheduled = Template.fromStack(
+        createTestStack({ lifecycle: { startSchedule: { cron: 'cron(30 10 ? * MON-FRI *)' } } })
+      );
+      scheduled.resourceCountIs('AWS::Scheduler::Schedule', 2);
+      scheduled.hasResourceProperties('AWS::Scheduler::Schedule', {
+        ScheduleExpression: 'cron(30 10 ? * MON-FRI *)',
       });
     });
   });

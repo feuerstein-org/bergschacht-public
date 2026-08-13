@@ -118,6 +118,7 @@ To see all available `mise` tasks run `mise run`.
 
 > Note:
 > `cdk diff` and `cdk deploy` require permissions to the account. You need at least ReadOnly permissions for `diff` and deployment permissions for `deploy`.
+> `mise run deploy` pins `AWS_PROFILE=dev` so a local deploy cannot accidentally hit Staging/Prod; override it explicitly (or use `pnpm run cdk deploy`) for another account. `diff` uses whatever profile is in your environment.
 > Synth needs no AWS credentials for artifact versions - they come from the committed `version-manifests/latest.json`.
 
 ### Adding a New Application Repository
@@ -478,23 +479,6 @@ The pipeline's synth step reads artifact versions from the committed `version-ma
 > manual approval already helps here. See `IcebergColumn.renamedFrom` in
 > `lib/infrastructure/iceberg-schema.ts` for the full rationale.
 
-> [!WARNING]
-> **Iceberg column renames + superseded pipelines.** Renaming a column on an Iceberg
-> table (via the `s3tables-table-manager` custom resource) is a **two-deploy migration**:
-> deploy 1 sets `renamedFrom` on the column and performs a true `rename_column`; deploy 2
-> removes the directive. This is only safe if deploy 1 reaches **every** stage before
-> deploy 2 does. CDK Pipelines / CodePipeline run in the default **SUPERSEDED** execution
-> mode, so a quickly-merged deploy 2 can leapfrog deploy 1 at a stage transition (e.g.
-> Staging → Prod) and hit a not-yet-renamed table with no `renamedFrom` present — the
-> reconciler then **drops the old column (losing its data) and adds an empty new one**
-> instead of renaming.
->
-> Because `renamedFrom` is idempotent and self-deactivating, the safe default is to **leave
-> the directive in place** and only remove it much later as unhurried housekeeping (once the
-> rename has provably reached every stage), and/or gate the two deploys — the Prod stage's
-> manual approval already helps here. See `IcebergColumn.renamedFrom` in
-> `lib/infrastructure/iceberg-schema.ts` for the full rationale.
-
 ### Development Pipeline (`DevelopmentPipelineStack`)
 
 - **Triggered by**: CodePipeline V2 push trigger on all branches matching `dev-*`
@@ -638,12 +622,53 @@ This stack creates an ECR repository for storing container images:
 - Optionally grants cross-account pull permissions to specified AWS accounts
 - Optionally sends SNS notifications when image scans detect CRITICAL or HIGH severity vulnerabilities via EventBridge rules
 
+### SnsPagerDuty
+
+Per-environment SNS topic for alerts, deployed by `EnvironmentStage` and passed into workload stacks as `alertTopic`. Publishes messages to PagerDuty.
+
 ### FoerderturmStack
 
-Application workload stack deployed by `EnvironmentStage` into Dev, Staging, and Prod. Hosts the [foerderturm](https://github.com/feuerstein-org/foerderturm) Dagster control plane (webserver + daemon) on Fargate, with Litestream replicating SQLite to S3 for durability and a Tailscale sidecar exposing the UI over the tailnet. See the [foerderturm repo](https://github.com/feuerstein-org/foerderturm) for the container images, local-dev compose stack, and a deeper explanation of why SQLite + Litestream over Postgres/EFS.
+Hosts the [foerderturm](https://github.com/feuerstein-org/foerderturm) Dagster control plane (webserver + daemon) on Fargate, backed by RDS Postgres, with a Tailscale sidecar exposing the UI over the tailnet. See the [foerderturm repo](https://github.com/feuerstein-org/foerderturm) for the container images and the local-dev compose stack.
 
-- Creates a minimal per-env VPC (public subnets only, no NAT) and an ECS Fargate cluster running one task with six containers (litestream-restore, dagster-init, dagster-webserver, dagster-daemon, litestream sidecar, tailscale sidecar) sharing a task-scoped `dagster-home` volume
-- Versioned, KMS-encrypted S3 bucket for Litestream WAL replication with `RETAIN` removal policy and 30-day noncurrent-version expiration
-- Pulls the three container images (`dagster`, `litestream`, `tailscale`) from the version manifest, all published by the foerderturm repo to the shared ECR repo
-- Reads the Tailscale OAuth client secret from SSM at `/tailscale/foerderturm/oauth-client` - this is a `SecureString` and must be created out-of-band (CloudFormation cannot create SecureString parameters)
-- Service uses `minHealthyPercent=0` / `maxHealthyPercent=100` (stop-then-start) because SQLite is single-writer; `desiredCount` is configured per-environment in `environment-stage.ts` (1 in prod, 0 in dev/staging to reduce cost) But mainly, security concerns, requirement for multiple version manifests in the future etc.
+- Creates a minimal per-env VPC (public subnets for compute, private subnets for the database, no NAT) and two ECS Fargate clusters (SPOT): one for the orchestrator task, one the Dagster `EcsRunLauncher` starts run workers in
+- One orchestrator task, four containers: `dagster-init` (runs `dagster instance migrate` on every deploy), `dagster-webserver`, `dagster-daemon`, and the `tailscale` sidecar. No shared volume - `dagster.yaml` is baked into the image
+- RDS Postgres (single-AZ) holds Dagster run/event-log/schedule storage, so run workers and the orchestrator share state and survive deploys and crashes.
+- Pulls the `dagster` and `tailscale` images from the version manifest, both published by the foerderturm repo to the shared ECR repo
+- Reads the Tailscale OAuth client secret from SSM at `/foerderturm-<env>/tailscale/oauth-client` - a `SecureString`, so it must be created out-of-band (CloudFormation cannot create SecureString parameters)
+- Service uses `minHealthyPercent=0` / `maxHealthyPercent=100` (stop-then-start) so two daemons never race the run queue
+
+#### Lifecycle (`FoerderturmLifecycle`)
+
+The orchestrator and RDS do not run around the clock. Three Step Functions state machines coordinate through a **single DynamoDB item** (table `foerderturm-<env>-lifecycle`, `pk=lease`) that records `leaseState` (`down` / `starting` / `up` / `stopping`), `holdUntil`, and `stoppingSince`.
+
+```
+EventBridge Scheduler                     lease item (DynamoDB)
+  ├─ daily cron  ──> start   ──> RDS start ──> service=1 ──> leaseState=up, holdUntil=+minSession
+  └─ every 5 min ──> reaper  ──> reads RDS + ECS + lease, then either:
+                                   workers running  ──> holdUntil = now + idleGrace
+                                   hold expired     ──> stop
+                                   stopping too long──> alarm (StopStalled)
+                                   stop ──> leaseState=stopping ──> service=0 ──> both clusters drained? ──> RDS stop ──> leaseState=down
+```
+
+- **start** (standard, 30 min timeout) - claims the lease as `starting`, starts RDS, polls until `available`, scales the service to 1, waits for a running task, then stamps `up`. Self-contained: it retries RDS/ECS internally until it succeeds or times out. Triggered by the daily cron or on demand.
+- **reaper** (express, every `reaperIntervalMinutes`). Reads RDS status, the service's desired count and the lease, then: does nothing, extends the hold, or delegates to **stop**. It also re-drives an in-progress teardown on every tick and raises `StopStalled` if the lease has read `stopping` for longer than `stopTimeoutMinutes`.
+- **stop** (standard, 10 min timeout) - idempotent. Marks `stopping`, scales the service to 0, and stops RDS **only if both clusters have drained**. Run workers outlive the daemon and keep writing to Postgres, so RDS is never pulled out from under them. If it can't finish (tasks still draining, RDS in a backup window) it succeeds with the lease left on `stopping` and the next reaper tick resumes it.
+
+Note:
+
+- **`minSessionMinutes` must exceed the gap from the start cron to both the first Dagster tick of the day and the close of the RDS backup window.**, if that's not the case the reaper can kill everything before work is started since it's seen as "idle".
+- The ECS service sets **no** `desiredCount`. CloudFormation then defaults it to 1 on stack _create_ and leaves the live value alone on every _update_, which is what lets the state machines own the count at runtime. Do not scale the service by hand.
+- To disable start cron pass `{}` as the lifecycle, note that reaper still runs and kills RDS/orphan instances.
+- The RDS backup time and maintenance window are hardcoded, missing them isn't a big deal since we have PITR enabled and RDS will do backups on startup if the last backup is a long time ago. It will also force maintenance if needed which should just delay the start a bit. Nonetheless it's a good idea to run the cron so it's within the hard-coded RDS backup window.
+- AWS force starts RDS every 7 days, reaper takes care of that if needed.
+- **A failed start leaves the lease pinned at `starting`.** `stopping` has a watchdog (`stoppingSince` + `stopTimeoutMinutes`), `starting` does not - the reaper reads `starting` as "a start is in flight, leave it alone", so nothing reaps it. If the start machine fails or hits its 30 min timeout with RDS already up, the environment stays up until someone intervenes. It does page (start alarm below); recovery is to fix the cause and re-run the start machine, or write the lease item back to `down` by hand.
+
+Alarms (all onto the environment's PagerDuty topic):
+
+- `foerderturm-<env>-lifecycle-{start,stop,reaper}-failed` - one per state machine, fires on any failed or timed-out execution.
+- `StopStalled` reaches you as the **reaper** alarm - the reaper fails itself on purpose once the lease has read `stopping` for longer than `stopTimeoutMinutes`. It re-fires every tick until the teardown completes or the lease is repaired.
+- RDS `maintenance` / `security patching` events (`DatabaseMaintenanceEvents`), since the instance is stopped most of the time and pending updates would otherwise go unnoticed.
+
+Manual starts:
+`manualHoldMinutes` determines how long the environment will stay up if it's started manually (reaper doesn't kill even if idling), to start/stop manually just execute the step functions in console/CLI.

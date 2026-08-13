@@ -18,32 +18,23 @@ export const githubOrg = process.env.GITHUB_ORG || 'feuerstein-org';
 export const githubRepo = process.env.GITHUB_REPO || 'bergschacht';
 
 /**
- * Naming convention for foerderturm connector Lambdas. Connectors live in their own
- * (data-plane) stack, but the orchestrator invokes them by name via Dagster Pipes
- * (`dg.EnvVar("CONNECTOR_<VENDOR>_LAMBDA_NAME")`). Keeping the name deterministic lets the
- * orchestrator grant `lambda:InvokeFunction` on a prefix pattern and receive the name as a
- * plain-string env var, so connectors can be added/removed without a hard cross-stack reference.
+ * Naming for the Dagster run-worker ECS tasks the orchestrator launches via the
+ * `WorkerImageEcsRunLauncher` (one task per run). The task definitions themselves are
+ * registered dynamically by the launcher at run time (family `run-worker_<worker>_<job>`); these
+ * names cover only the deterministic *roles* the launcher passes (`iam:PassRole`) and are
+ * referenced by ARN, so no cross-stack handle is needed.
  */
-export const connectorPrefix = 'foerderturm-connector-';
-
-/** Deterministic function name for a connector, e.g. `connectorFunctionName('example', 'dev')` */
-export const connectorFunctionName = (vendor: string, environment: string): string =>
-  `${connectorPrefix}${vendor}-${environment}`;
-
-/** Deterministic task name for a connetor, e.g. `connectorEcsTaskFamily('example', 'dev')` */
-export const connectorEcsTaskFamily = (vendor: string, environment: string): string =>
-  `${connectorPrefix}${vendor}-ecs-${environment}`;
-export const connectorEcsTaskRoleName = (vendor: string, environment: string): string =>
-  `${connectorPrefix}${vendor}-ecs-task-${environment}`;
-export const connectorEcsExecRoleName = (vendor: string, environment: string): string =>
-  `${connectorPrefix}${vendor}-ecs-exec-${environment}`;
-
+export const runWorkerPrefix = 'foerderturm-runworker-';
+/** Execution role for run-worker ECS tasks (ECR pull, CloudWatch logs, DB-secret read). */
+export const runWorkerExecRoleName = (environment: string): string =>
+  `${runWorkerPrefix}exec-${environment}`;
 /**
- * Container name of the connector container inside every connector ECS task definition. The
- * orchestrator targets it in `run_task` containerOverrides (feed/source env), so it must be
- * identical across connectors.
+ * Task-definition family prefix the EcsRunLauncher stamps onto every run-worker task def
+ * (`task_definition_prefix` in foerderturm's dagster.yaml). The orchestrator's `ecs:RunTask`
+ * is scoped to `<prefix>_*`, so this MUST stay in sync with dagster.yaml. Max 16 chars.
+ * WorkerImageEcsRunLauncher completes each family as `<prefix>_<worker>_<job>`.
  */
-export const connectorEcsContainerName = 'connector';
+export const runWorkerTaskFamilyPrefix = 'run-worker';
 
 /**
  * Application repository configuration.
