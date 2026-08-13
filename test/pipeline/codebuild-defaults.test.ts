@@ -1,4 +1,4 @@
-import { PIPELINE_CODEBUILD_DEFAULTS } from '../../lib/pipeline/codebuild-defaults';
+import { PIPELINE_CODEBUILD_DEFAULTS } from '../../lib/pipeline/codebuild-defaults.ts';
 
 describe('PIPELINE_CODEBUILD_DEFAULTS', () => {
   test('pins ARM Lambda compute on the Node.js 22 image', () => {

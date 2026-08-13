@@ -2,9 +2,7 @@
   "name": "bergschacht",
   "version": "0.1.0",
   "private": true,
-  "bin": {
-    "bergschacht": "bin/bergschacht.js"
-  },
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
@@ -29,7 +27,6 @@
     "eslint-plugin-awscdk": "^4.3.3",
     "eslint-plugin-jsdoc": "^63.1.0",
     "prettier": "^3.9.5",
-    "ts-node": "^10.9.2",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.64.0",
     "vitest": "^3.2.4"

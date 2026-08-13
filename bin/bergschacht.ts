@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib/core';
 import { AwsSolutionsChecks } from 'cdk-nag';
-import { SharedKmsKeyStack } from '../lib/infrastructure/shared-kms-key-stack';
-import { InfrastructurePipelineStack } from '../lib/pipeline/infrastructure-pipeline-stack';
-import { DevelopmentPipelineStack } from '../lib/pipeline/development-pipeline-stack';
-import { ProductionPipelineStack } from '../lib/pipeline/production-pipeline-stack';
+import { SharedKmsKeyStack } from '../lib/infrastructure/shared-kms-key-stack.ts';
+import { InfrastructurePipelineStack } from '../lib/pipeline/infrastructure-pipeline-stack.ts';
+import { DevelopmentPipelineStack } from '../lib/pipeline/development-pipeline-stack.ts';
+import { ProductionPipelineStack } from '../lib/pipeline/production-pipeline-stack.ts';
 import {
   cicdAccount,
   devAccount,
@@ -16,7 +16,7 @@ import {
   githubOrg,
   githubRepo,
   applicationRepos,
-} from '../lib/config/constants';
+} from '../lib/config/constants.ts';
 
 const app = new cdk.App();
 

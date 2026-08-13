@@ -7,7 +7,7 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import {
   FoerderturmLifecycle,
   type FoerderturmLifecycleConfig,
-} from '../../lib/infrastructure/foerderturm-lifecycle';
+} from '../../lib/infrastructure/foerderturm-lifecycle.ts';
 
 /** The real stage/prod cron (see environment-stage.ts), in UTC like everything else on this path. */
 const DAILY_START = { cron: 'cron(30 10 ? * MON-FRI *)' };

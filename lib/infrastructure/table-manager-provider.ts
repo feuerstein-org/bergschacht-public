@@ -8,7 +8,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { getLambdaArtifact } from '../config/version-manifest';
+import { getLambdaArtifact } from '../config/version-manifest.ts';
 
 export interface TableManagerProviderProps {
   /**

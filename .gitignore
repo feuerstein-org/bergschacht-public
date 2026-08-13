@@ -1,5 +1,4 @@
 *.js
-!jest.config.js
 *.d.ts
 mise.local.toml
 node_modules

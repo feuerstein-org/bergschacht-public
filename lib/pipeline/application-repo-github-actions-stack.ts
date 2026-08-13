@@ -2,8 +2,8 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
-import { GitHubActionsStack } from './github-actions-stack';
-import { ApplicationRepo } from '../config/constants';
+import { GitHubActionsStack } from './github-actions-stack.ts';
+import type { ApplicationRepo } from '../config/constants.ts';
 
 export interface ApplicationRepoGitHubActionsProps {
   /**

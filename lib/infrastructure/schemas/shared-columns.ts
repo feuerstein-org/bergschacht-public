@@ -13,7 +13,7 @@
  * ```
  */
 
-import type { IcebergColumn } from '../iceberg-schema';
+import type { IcebergColumn } from '../iceberg-schema.ts';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  BRONZE LAYER - shared column groups

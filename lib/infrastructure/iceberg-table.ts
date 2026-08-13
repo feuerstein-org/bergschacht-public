@@ -1,8 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import { Construct } from 'constructs';
-import type { IcebergSchemaDefinition } from './iceberg-schema';
-import { validateSchemaDefinition } from './iceberg-schema';
+import type { IcebergSchemaDefinition } from './iceberg-schema.ts';
+import { validateSchemaDefinition } from './iceberg-schema.ts';
 
 export interface IcebergTableProps {
   /**

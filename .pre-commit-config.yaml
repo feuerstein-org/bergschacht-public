@@ -35,3 +35,9 @@ repos:
         entry: 'pnpm run lint'
         language: system
         pass_filenames: false
+
+      - id: tsc
+        name: typecheck
+        entry: 'pnpm run build'
+        language: system
+        pass_filenames: false

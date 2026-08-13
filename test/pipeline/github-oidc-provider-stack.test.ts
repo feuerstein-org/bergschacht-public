@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
-import { GitHubOIDCProviderStack } from '../../lib/pipeline/github-oidc-provider-stack';
+import { GitHubOIDCProviderStack } from '../../lib/pipeline/github-oidc-provider-stack.ts';
 
 describe('GitHubOIDCProviderStack', () => {
   let stack: GitHubOIDCProviderStack;

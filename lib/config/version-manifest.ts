@@ -80,7 +80,7 @@ export interface VersionManifest {
 
 /** Absolute path to the committed version manifest. */
 export const VERSION_MANIFEST_PATH = path.resolve(
-  __dirname,
+  import.meta.dirname,
   '..',
   '..',
   'version-manifests',

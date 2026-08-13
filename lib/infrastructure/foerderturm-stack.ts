@@ -11,14 +11,14 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { ContainerArtifact, getContainerImage } from '../config/version-manifest';
-import { FoerderturmLifecycle, type FoerderturmLifecycleConfig } from './foerderturm-lifecycle';
+import { type ContainerArtifact, getContainerImage } from '../config/version-manifest.ts';
+import { FoerderturmLifecycle, type FoerderturmLifecycleConfig } from './foerderturm-lifecycle.ts';
 import {
   runWorkerExecRoleName,
   runWorkerPrefix,
   runWorkerTaskFamilyPrefix,
-} from '../config/constants';
-import { type BronzeTableNamespace, grantTableAccess } from './table-access';
+} from '../config/constants.ts';
+import { type BronzeTableNamespace, grantTableAccess } from './table-access.ts';
 
 // TODO: Add a metric + alarm later which raises when no work was done that day, currently the lifecycle
 // could just kill the orchestrator before ANY work was done (e.g. RDS took too long to start) and we wouldn't acknowledge

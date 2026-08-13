@@ -1,9 +1,9 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { IOpenIdConnectProvider } from 'aws-cdk-lib/aws-iam';
+import type { IOpenIdConnectProvider } from 'aws-cdk-lib/aws-iam';
 import { Template } from 'aws-cdk-lib/assertions';
-import { GitHubActionsStack } from '../../lib/pipeline/github-actions-stack';
-import { GitHubOIDCProviderStack } from '../../lib/pipeline/github-oidc-provider-stack';
+import { GitHubActionsStack } from '../../lib/pipeline/github-actions-stack.ts';
+import { GitHubOIDCProviderStack } from '../../lib/pipeline/github-oidc-provider-stack.ts';
 
 describe('GitHubActionsStack', () => {
   let app: cdk.App;

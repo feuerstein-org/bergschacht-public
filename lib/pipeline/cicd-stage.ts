@@ -2,15 +2,15 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { CentralLoggingBucketStack } from '../infrastructure/central-logging-bucket-stack';
-import { LambdaArtifactsStack } from '../infrastructure/lambda-artifacts-stack';
-import { EcrStack } from '../infrastructure/ecr-stack';
-import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty';
-import { ReadOnlyRoleStack } from '../infrastructure/readonly-role-stack';
-import { GitHubOIDCProviderStack } from './github-oidc-provider-stack';
-import { GitHubActionsStack } from './github-actions-stack';
-import { createApplicationRepoGitHubActions } from './application-repo-github-actions-stack';
-import { ApplicationRepo } from '../config/constants';
+import { CentralLoggingBucketStack } from '../infrastructure/central-logging-bucket-stack.ts';
+import { LambdaArtifactsStack } from '../infrastructure/lambda-artifacts-stack.ts';
+import { EcrStack } from '../infrastructure/ecr-stack.ts';
+import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty.ts';
+import { ReadOnlyRoleStack } from '../infrastructure/readonly-role-stack.ts';
+import { GitHubOIDCProviderStack } from './github-oidc-provider-stack.ts';
+import { GitHubActionsStack } from './github-actions-stack.ts';
+import { createApplicationRepoGitHubActions } from './application-repo-github-actions-stack.ts';
+import type { ApplicationRepo } from '../config/constants.ts';
 
 export interface CicdStageProps extends cdk.StageProps {
   /**

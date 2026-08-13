@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as kms from 'aws-cdk-lib/aws-kms';
-import { TableBucketStack } from '../../lib/infrastructure/table-bucket-stack';
+import { TableBucketStack } from '../../lib/infrastructure/table-bucket-stack.ts';
 
 describe('TableBucketStack', () => {
   let template: Template;

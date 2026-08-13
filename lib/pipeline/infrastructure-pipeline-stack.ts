@@ -5,9 +5,9 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { CicdStage } from './cicd-stage';
-import { ApplicationRepo } from '../config/constants';
-import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults';
+import { CicdStage } from './cicd-stage.ts';
+import type { ApplicationRepo } from '../config/constants.ts';
+import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults.ts';
 
 export interface InfrastructurePipelineStackProps extends cdk.StackProps {
   /**

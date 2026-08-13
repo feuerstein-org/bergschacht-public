@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { LambdaArtifactsStack } from '../../lib/infrastructure/lambda-artifacts-stack';
+import { LambdaArtifactsStack } from '../../lib/infrastructure/lambda-artifacts-stack.ts';
 
 const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 

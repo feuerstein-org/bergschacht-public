@@ -2,9 +2,9 @@ import * as cdk from 'aws-cdk-lib/core';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import * as sns from 'aws-cdk-lib/aws-sns';
-import { FoerderturmStack } from '../../lib/infrastructure/foerderturm-stack';
-import type { FoerderturmLifecycleConfig } from '../../lib/infrastructure/foerderturm-lifecycle';
-import type { BronzeTableNamespace } from '../../lib/infrastructure/table-access';
+import { FoerderturmStack } from '../../lib/infrastructure/foerderturm-stack.ts';
+import type { FoerderturmLifecycleConfig } from '../../lib/infrastructure/foerderturm-lifecycle.ts';
+import type { BronzeTableNamespace } from '../../lib/infrastructure/table-access.ts';
 
 const TEST_IMAGE_ARTIFACT = {
   repository: '123456789012.dkr.ecr.us-east-1.amazonaws.com/feuerstein',

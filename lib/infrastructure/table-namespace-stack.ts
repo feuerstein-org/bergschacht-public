@@ -2,9 +2,9 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import { Construct } from 'constructs';
-import type { IcebergSchemaDefinition } from './iceberg-schema';
-import { IcebergTable } from './iceberg-table';
-import { TableManagerProvider } from './table-manager-provider';
+import type { IcebergSchemaDefinition } from './iceberg-schema.ts';
+import { IcebergTable } from './iceberg-table.ts';
+import { TableManagerProvider } from './table-manager-provider.ts';
 
 /**
  * Definition of a single Iceberg table to be created inside the namespace.

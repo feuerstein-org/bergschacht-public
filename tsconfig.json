@@ -17,9 +17,11 @@
     "noFallthroughCasesInSwitch": false,
     "inlineSourceMap": true,
     "inlineSources": true,
-    "experimentalDecorators": true,
     "strictPropertyInitialization": false,
     "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true,
     "types": ["vitest/globals", "node"]
   },

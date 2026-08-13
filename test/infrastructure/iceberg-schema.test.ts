@@ -1,5 +1,5 @@
-import { validateSchemaDefinition } from '../../lib/infrastructure/iceberg-schema';
-import type { IcebergSchemaDefinition } from '../../lib/infrastructure/iceberg-schema';
+import { validateSchemaDefinition } from '../../lib/infrastructure/iceberg-schema.ts';
+import type { IcebergSchemaDefinition } from '../../lib/infrastructure/iceberg-schema.ts';
 
 describe('validateSchemaDefinition', () => {
   test('accepts a plain schema with no rename directives', () => {

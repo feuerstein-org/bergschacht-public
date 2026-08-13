@@ -5,8 +5,8 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { EnvironmentStage } from './environment-stage';
-import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults';
+import { EnvironmentStage } from './environment-stage.ts';
+import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults.ts';
 
 export interface ProductionPipelineStackProps extends cdk.StackProps {
   /**

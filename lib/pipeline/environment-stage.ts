@@ -2,14 +2,14 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { TableNamespaceStack } from '../infrastructure/table-namespace-stack';
-import { TableBucketStack } from '../infrastructure/table-bucket-stack';
-import { SharedKmsKeyStack } from '../infrastructure/shared-kms-key-stack';
-import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty';
-import { BRONZE_TABLES } from '../infrastructure/schemas';
-import { FoerderturmStack } from '../infrastructure/foerderturm-stack';
-import { devAccount, stageAccount, prodAccount } from '../config/constants';
-import { type ContainerArtifact, getImageArtifact } from '../config/version-manifest';
+import { TableNamespaceStack } from '../infrastructure/table-namespace-stack.ts';
+import { TableBucketStack } from '../infrastructure/table-bucket-stack.ts';
+import { SharedKmsKeyStack } from '../infrastructure/shared-kms-key-stack.ts';
+import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty.ts';
+import { BRONZE_TABLES } from '../infrastructure/schemas/index.ts';
+import { FoerderturmStack } from '../infrastructure/foerderturm-stack.ts';
+import { devAccount, stageAccount, prodAccount } from '../config/constants.ts';
+import { type ContainerArtifact, getImageArtifact } from '../config/version-manifest.ts';
 
 export interface EnvironmentStageProps extends cdk.StageProps {
   /**

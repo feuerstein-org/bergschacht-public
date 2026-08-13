@@ -2,8 +2,8 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { GitHubOIDCProviderStack } from '../../lib/pipeline/github-oidc-provider-stack';
-import { createApplicationRepoGitHubActions } from '../../lib/pipeline/application-repo-github-actions-stack';
+import { GitHubOIDCProviderStack } from '../../lib/pipeline/github-oidc-provider-stack.ts';
+import { createApplicationRepoGitHubActions } from '../../lib/pipeline/application-repo-github-actions-stack.ts';
 
 const TEST_KMS_KEY_ARN = 'arn:aws:kms:us-east-1:111111111111:key/test-key-id';
 

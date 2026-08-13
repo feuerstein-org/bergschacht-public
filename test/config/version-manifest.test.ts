@@ -12,7 +12,7 @@ import {
   type VersionManifest,
   _resetManifestCache,
   _loadManifestFromData,
-} from '../../lib/config/version-manifest';
+} from '../../lib/config/version-manifest.ts';
 
 /**
  * Manifest contents used across tests. Mirrors version-manifests/latest.json.

@@ -4,10 +4,10 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3tables from '@aws-cdk/aws-s3tables-alpha';
 import {
   TableNamespaceStack,
-  TableDefinition,
-} from '../../lib/infrastructure/table-namespace-stack';
-import { IcebergSchemaDefinition } from '../../lib/infrastructure/iceberg-schema';
-import { _loadManifestFromData } from '../../lib/config/version-manifest';
+  type TableDefinition,
+} from '../../lib/infrastructure/table-namespace-stack.ts';
+import type { IcebergSchemaDefinition } from '../../lib/infrastructure/iceberg-schema.ts';
+import { _loadManifestFromData } from '../../lib/config/version-manifest.ts';
 
 const testSchema: IcebergSchemaDefinition = {
   columns: [

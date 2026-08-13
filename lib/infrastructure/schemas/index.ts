@@ -16,14 +16,14 @@
  * @see DATA_DESIGN.md for the full design rationale.
  */
 
-import type { TableDefinition } from '../table-namespace-stack';
+import type { TableDefinition } from '../table-namespace-stack.ts';
 
 import {
   BRONZE_SECURITY_MASTER,
   BRONZE_FACT_DAILY_OHLCV,
   BRONZE_FACT_CORPORATE_ACTIONS,
   BRONZE_FACT_DAILY_METRICS,
-} from './bronze-schemas';
+} from './bronze-schemas.ts';
 
 // ---------------------------------------------------------------------------
 // Pre-built table definition arrays for use with TableNamespaceStack

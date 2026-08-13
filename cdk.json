@@ -1,5 +1,5 @@
 {
-  "app": "pnpm exec ts-node --prefer-ts-exts bin/bergschacht.ts",
+  "app": "node bin/bergschacht.ts",
   "watch": {
     "include": ["**"],
     "exclude": [

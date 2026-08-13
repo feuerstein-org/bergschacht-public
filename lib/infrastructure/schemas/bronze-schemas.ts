@@ -23,8 +23,8 @@
  *  - {@link BRONZE_VENDOR_IDENTIFIER_COLUMNS} - unresolved vendor identifiers (fact tables)
  */
 
-import type { IcebergSchemaDefinition } from '../iceberg-schema';
-import { BRONZE_PROVENANCE_COLUMNS, BRONZE_VENDOR_IDENTIFIER_COLUMNS } from './shared-columns';
+import type { IcebergSchemaDefinition } from '../iceberg-schema.ts';
+import { BRONZE_PROVENANCE_COLUMNS, BRONZE_VENDOR_IDENTIFIER_COLUMNS } from './shared-columns.ts';
 
 /**
  * Precision 18 keeps the column in Parquet's 8-byte INT64 encoding (19 would use more storage)
