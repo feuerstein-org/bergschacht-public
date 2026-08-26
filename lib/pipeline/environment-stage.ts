@@ -136,8 +136,7 @@ export class EnvironmentStage extends cdk.Stage {
         const foerderturmImage = (artifactName: string): ContainerArtifact =>
           getImageArtifact('foerderturm', artifactName);
 
-        // SSM SecureString holding the Massive API key; create it manually before deploying.
-        // The Massive worker (running in-op in its run-worker task) resolves it at runtime.
+        // Out-of-band SecureString - see README.md#manual-secrets.
         const massiveApiKeyParam = `/foerderturm-${props.environment}/massive/api-key`;
 
         // foerderturm Dagster orchestrator. Every run executes in-op inside its worker's own

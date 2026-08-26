@@ -164,16 +164,8 @@ export interface FoerderturmStackProps extends cdk.StackProps {
  *   start RDS and scale the service to 1 on a schedule or on demand, and shut both down once the
  *   run workers have been idle for a while.
  *
- * Operator setup (out of scope for CDK):
- * - Create the `tag:foerderturm` tag and an OAuth client in the Tailscale admin console
- *   with `auth_keys` scope authorized for that tag.
- * - In each env account, create an SSM SecureString parameter at
- *   `/foerderturm-<env>/tailscale/oauth-client` (e.g. `/foerderturm-prod/tailscale/oauth-client`)
- *   holding the OAuth client secret
- *   (`tskey-client-...`). CloudFormation cannot create SecureString parameters, so this
- *   must be done out-of-band (e.g. `aws ssm put-parameter --type SecureString`) before
- *   the task starts. OAuth is required for tailscale to mint auth keys to allow out container
- *   to connect to the tailnet (give Auth Keys permissions to the oauth key you create)
+ * Operator prerequisites and manual SecureString setup are documented in
+ * README.md#manual-secrets.
  */
 export class FoerderturmStack extends cdk.Stack {
   public readonly vpc: ec2.IVpc;
@@ -385,7 +377,7 @@ export class FoerderturmStack extends cdk.Stack {
       });
     });
 
-    // ---- Tailscale OAuth client secret (SSM SecureString, created out-of-band) ----
+    // ---- Tailscale OAuth client secret - see README.md#manual-secrets ----
     this.tailscaleSecret = ssm.StringParameter.fromSecureStringParameterAttributes(
       this,
       'TailscaleOAuthSecret',

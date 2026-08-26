@@ -524,6 +524,40 @@ In case CDK pipelines are not deployed or need to be redeployed:
 
 After initial deployment, the pipelines are self-mutating and will update themselves when you push changes to the pipeline code.
 
+#### Manual secrets
+
+CloudFormation cannot create SSM `SecureString` parameters, so create the following in each environment account and region before deploying that environment. The environments are `dev`, `stage`, and `prod`, replace `<env>` in the examples with the environment being configured.
+CDK imports these parameters by name without checking that they exist, so synth and deployment can succeed even when a parameter is missing. The failure only appears when the consuming ECS task runs.
+
+| Parameter                                   | Value                                              | If missing                                                                                                                              |
+| ------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `/foerderturm-<env>/tailscale/oauth-client` | Tailscale OAuth client secret (`tskey-client-...`) | ECS cannot inject the secret as `TS_AUTHKEY`, so the Foerderturm orchestrator task fails to start.                                      |
+| `/foerderturm-<env>/massive/api-key`        | Massive API key                                    | The orchestrator and other workers are unaffected, but Massive runs fail when the Massive worker tries to resolve the API key from SSM. |
+
+Before creating the Tailscale parameter, configure the tailnet in the Tailscale admin console:
+
+1. Add the `tag:foerderturm` ACL tag.
+2. Create an OAuth client with the `auth_keys` scope, authorized for `tag:foerderturm`.
+3. Store that OAuth client's secret in the Tailscale parameter for each environment.
+
+Create the parameters while authenticated to the target environment's AWS account and region:
+
+```bash
+aws ssm put-parameter \
+  --name "/foerderturm-<env>/tailscale/oauth-client" \
+  --type SecureString \
+  --value "tskey-client-..." \
+  --description "Tailscale OAuth client secret for Foerderturm"
+
+aws ssm put-parameter \
+  --name "/foerderturm-<env>/massive/api-key" \
+  --type SecureString \
+  --value "<massive-api-key>" \
+  --description "Massive API key for Foerderturm"
+```
+
+Use `--overwrite` when rotating an existing parameter.
+
 ## Stacks
 
 ### GitHubOIDCProvider
@@ -634,7 +668,7 @@ Hosts the [foerderturm](https://github.com/feuerstein-org/foerderturm) Dagster c
 - One orchestrator task, four containers: `dagster-init` (runs `dagster instance migrate` on every deploy), `dagster-webserver`, `dagster-daemon`, and the `tailscale` sidecar. No shared volume - `dagster.yaml` is baked into the image
 - RDS Postgres (single-AZ) holds Dagster run/event-log/schedule storage, so run workers and the orchestrator share state and survive deploys and crashes.
 - Pulls the `dagster` and `tailscale` images from the version manifest, both published by the foerderturm repo to the shared ECR repo
-- Reads the Tailscale OAuth client secret from SSM at `/foerderturm-<env>/tailscale/oauth-client` - a `SecureString`, so it must be created out-of-band (CloudFormation cannot create SecureString parameters)
+- Reads the per-environment Tailscale OAuth client secret and Massive API key from SSM; see [Manual secrets](#manual-secrets) for the required parameters and setup
 - Service uses `minHealthyPercent=0` / `maxHealthyPercent=100` (stop-then-start) so two daemons never race the run queue
 
 #### Lifecycle (`FoerderturmLifecycle`)
