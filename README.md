@@ -100,9 +100,11 @@ mise run pre-commit         # Run pre-commit (formatting/linting)
 mise run build              # Build CDK
 mise run test               # Build & run tests with coverage
 mise run test-full          # Build, test, pre-commit & synth
+mise run list               # List all deployable stacks
 mise run synth              # Build & synthesize stacks
 mise run diff               # Show diff for stacks
-mise run deploy             # Deploy to AWS
+mise run deploy             # Deploy stacks to AWS
+mise run deploy-express     # Deploy in CloudFormation express mode (dev iteration)
 mise run pin -- <repo> <images|lambdas> <name> <reason>  # Pin an artifact at its current version
 mise run unpin -- <repo> <images|lambdas> <name>         # Drop the pin; latest deploys again
 
@@ -120,6 +122,38 @@ To see all available `mise` tasks run `mise run`.
 > `cdk diff` and `cdk deploy` require permissions to the account. You need at least ReadOnly permissions for `diff` and deployment permissions for `deploy`.
 > `mise run deploy` pins `AWS_PROFILE=dev` so a local deploy cannot accidentally hit Staging/Prod; override it explicitly (or use `pnpm run cdk deploy`) for another account. `diff` uses whatever profile is in your environment.
 > Synth needs no AWS credentials for artifact versions - they come from the committed `version-manifests/latest.json`.
+
+#### Deploying a stack to Dev
+
+Application workloads live inside pipeline _stages_, so they are addressed by their full construct path, not a bare stack name. Run `mise run list` to see them all:
+
+```bash
+mise run list
+```
+
+```
+SharedKmsKey
+InfrastructurePipeline
+...
+DevelopmentPipeline/Dev/S3TablesBronzeNamespace (Dev-S3TablesBronzeNamespace)
+DevelopmentPipeline/Dev/Foerderturm (Dev-Foerderturm)
+```
+
+So to iterate on just the Foerderturm workload in the Dev account:
+
+```bash
+mise run diff DevelopmentPipeline/Dev/Foerderturm
+mise run deploy DevelopmentPipeline/Dev/Foerderturm
+```
+
+You can use [CloudFormation Express](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) mode to speed up deployment - recommended for dev:
+
+```bash
+mise run deploy-express DevelopmentPipeline/Dev/Foerderturm
+```
+
+> Note:
+> Deploying a stage stack directly bypasses the pipeline. It is the fastest way to deploy a stack, but the Dev account is shared - see [Development Pipeline](#development-pipeline-developmentpipelinestack) for the caveats around concurrent feature branches.
 
 ### Adding a New Application Repository
 

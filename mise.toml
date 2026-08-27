@@ -45,11 +45,18 @@ usage = 'arg "[stacks]..." help="Stack names to diff (defaults to ** for all)"'
 run = 'pnpm run cdk diff ${usage_stacks:-"**"}'
 
 [tasks.deploy]
-description = "Deploy stacks (defaults to all with '**', or pass stack names)"
+description = "Deploy stacks (pass stack names, e.g. DevelopmentPipeline/Dev/Foerderturm)"
 depends = ["build"]
-usage = 'arg "[stacks]..." help="Stack names to deploy (defaults to ** for all)"'
+usage = 'arg "<stacks>..." help="Stack names to deploy, e.g. DevelopmentPipeline/Dev/Foerderturm"'
 env = { AWS_PROFILE = "dev" }
-run = 'pnpm run cdk deploy ${usage_stacks:-"**"}'
+run = 'pnpm run cdk deploy ${usage_stacks}'
+
+[tasks.deploy-express]
+description = "Deploy stacks in CloudFormation express mode (dev iteration only)"
+depends = ["build"]
+usage = 'arg "<stacks>..." help="Stack names to deploy, e.g. DevelopmentPipeline/Dev/Foerderturm"'
+env = { AWS_PROFILE = "dev" }
+run = 'pnpm run cdk deploy --express ${usage_stacks}'
 
 [tasks.pin]
 description = "Pin an artifact at its currently deploying version; newer publishes only advance `latest`"
