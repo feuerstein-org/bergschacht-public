@@ -23,18 +23,17 @@
     "ajv-formats": "^3.0.1",
     "aws-cdk": "2.1138.0",
     "cdk-nag": "2.38.2",
-    "eslint": "^10.9.1",
-    "eslint-plugin-awscdk": "^4.4.0",
+    "eslint": "^10.10.0",
+    "eslint-plugin-awscdk": "^4.4.1",
     "eslint-plugin-jsdoc": "^63.3.3",
     "prettier": "^3.9.6",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.68.0",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^3.2.7"
   },
-  "//": "Pinned until this is resolved: https://github.com/feuerstein-org/bergschacht/issues/38",
   "dependencies": {
-    "@aws-cdk/aws-s3tables-alpha": "2.256.1-alpha.0",
-    "aws-cdk-lib": "2.256.1",
+    "@aws-cdk/aws-s3tables-alpha": "2.267.0-alpha.0",
+    "aws-cdk-lib": "2.268.0",
     "constructs": "10.6.0"
   }
 }
