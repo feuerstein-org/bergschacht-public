@@ -36,6 +36,7 @@ export class TableBucketStack extends cdk.Stack {
       },
       encryption: s3tables.TableBucketEncryption.KMS,
       encryptionKey: props.encryptionKey,
+      storageClass: s3tables.StorageClass.INTELLIGENT_TIERING,
     });
 
     new cdk.CfnOutput(this, 'TableBucketArn', {
