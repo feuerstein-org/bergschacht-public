@@ -8,10 +8,10 @@
             "s3tables-table-manager": {
               "latest": {
                 "bucket": "example-lambda-artifacts",
-                "commitSha": "894fe09d3308ec79c028169ffcae88a76f22cf98",
-                "key": "bergschacht-custom-resources/s3tables-table-manager-0.3.1.zip",
+                "commitSha": "284a8560525095cc9834f7507e79469444501798",
+                "key": "bergschacht-custom-resources/s3tables-table-manager.s3tables-table-manager.0.3.2.zip",
                 "objectVersion": "example-object-version",
-                "version": "0.3.1"
+                "version": "0.3.2"
               }
             }
           }
