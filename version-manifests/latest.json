@@ -61,18 +61,18 @@
           "images": {
             "dagster": {
               "latest": {
-                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
-                "imageTag": "foerderturm.foerderturm.dagster.0.7.2",
+                "commitSha": "abeeaccd171598872c66194b09850bd41d072dbb",
+                "imageTag": "foerderturm.foerderturm.dagster.0.7.3",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.7.2"
+                "version": "0.7.3"
               }
             },
             "tailscale": {
               "latest": {
-                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
-                "imageTag": "foerderturm.foerderturm.tailscale.0.7.2",
+                "commitSha": "abeeaccd171598872c66194b09850bd41d072dbb",
+                "imageTag": "foerderturm.foerderturm.tailscale.0.7.3",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.7.2"
+                "version": "0.7.3"
               }
             }
           }
