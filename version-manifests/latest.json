@@ -131,6 +131,14 @@
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
                 "version": "0.1.1"
               }
+            },
+            "sample-python-repo": {
+              "latest": {
+                "commitSha": "43a89ed4d686eb44b3d5bf216ce2a90d870b494d",
+                "imageTag": "sample-python-repo.sample-python-repo.sample-python-repo.0.1.2",
+                "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+                "version": "0.1.2"
+              }
             }
           },
           "lambdas": {
@@ -141,6 +149,15 @@
                 "key": "sample-python-repo/sample-etl-pipeline-0.1.1.zip",
                 "objectVersion": "example-object-version",
                 "version": "0.1.1"
+              }
+            },
+            "sample-python-repo": {
+              "latest": {
+                "bucket": "example-lambda-artifacts",
+                "commitSha": "43a89ed4d686eb44b3d5bf216ce2a90d870b494d",
+                "key": "sample-python-repo/sample-python-repo.sample-python-repo.0.1.2.zip",
+                "objectVersion": "example-object-version",
+                "version": "0.1.2"
               }
             }
           }
