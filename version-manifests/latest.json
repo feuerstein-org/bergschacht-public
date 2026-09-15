@@ -25,10 +25,10 @@
           "images": {
             "connector-example-worker": {
               "latest": {
-                "commitSha": "c3ea6ba03da759ce28c790b84f502f695c2072f1",
-                "imageTag": "foerderturm-connector-example-worker-0.4.1",
+                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
+                "imageTag": "foerderturm.connector-example.connector-example-worker.0.4.2",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.4.1"
+                "version": "0.4.2"
               }
             }
           }
@@ -37,10 +37,10 @@
           "images": {
             "connector-massive-worker": {
               "latest": {
-                "commitSha": "c3ea6ba03da759ce28c790b84f502f695c2072f1",
-                "imageTag": "foerderturm-connector-massive-worker-0.4.1",
+                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
+                "imageTag": "foerderturm.connector-massive.connector-massive-worker.0.4.2",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.4.1"
+                "version": "0.4.2"
               }
             }
           }
@@ -49,10 +49,10 @@
           "images": {
             "connector-sharadar-worker": {
               "latest": {
-                "commitSha": "c3ea6ba03da759ce28c790b84f502f695c2072f1",
-                "imageTag": "foerderturm-connector-sharadar-worker-0.3.1",
+                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
+                "imageTag": "foerderturm.connector-sharadar.connector-sharadar-worker.0.3.2",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.3.1"
+                "version": "0.3.2"
               }
             }
           }
@@ -61,18 +61,18 @@
           "images": {
             "dagster": {
               "latest": {
-                "commitSha": "c3ea6ba03da759ce28c790b84f502f695c2072f1",
-                "imageTag": "foerderturm-dagster-0.7.1",
+                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
+                "imageTag": "foerderturm.foerderturm.dagster.0.7.2",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.7.1"
+                "version": "0.7.2"
               }
             },
             "tailscale": {
               "latest": {
-                "commitSha": "c3ea6ba03da759ce28c790b84f502f695c2072f1",
-                "imageTag": "foerderturm-tailscale-0.7.1",
+                "commitSha": "109a05c45ebe194e2b80b657ed3634f5ed7daf1a",
+                "imageTag": "foerderturm.foerderturm.tailscale.0.7.2",
                 "repository": "111111111111.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-                "version": "0.7.1"
+                "version": "0.7.2"
               }
             }
           }
