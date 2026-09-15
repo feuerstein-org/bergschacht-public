@@ -60,12 +60,17 @@ export interface ManifestEntry<T> {
   pinReason?: string;
 }
 
-/** Artifact entries of a single source repository. */
+/** Artifact entries of one independently versioned package. */
+export interface ManifestPackage {
+  images?: Record<string, ManifestEntry<ContainerArtifact>>;
+  lambdas?: Record<string, ManifestEntry<LambdaArtifact>>;
+}
+
+/** Packages of a single source repository. */
 export interface ManifestRepository {
   /** Source repository (owner/repo) that produces these artifacts */
   source: string;
-  images?: Record<string, ManifestEntry<ContainerArtifact>>;
-  lambdas?: Record<string, ManifestEntry<LambdaArtifact>>;
+  packages: Record<string, ManifestPackage>;
 }
 
 /** Shape of version-manifests/latest.json. */
@@ -93,8 +98,23 @@ let manifestCache: VersionManifest | undefined;
 /** Load and cache the version manifest from disk. */
 function loadManifest(): VersionManifest {
   if (manifestCache) return manifestCache;
-  manifestCache = JSON.parse(fs.readFileSync(VERSION_MANIFEST_PATH, 'utf-8')) as VersionManifest;
+  manifestCache = validateManifest(
+    JSON.parse(fs.readFileSync(VERSION_MANIFEST_PATH, 'utf-8')) as VersionManifest
+  );
   return manifestCache;
+}
+
+/** Validate the package-scoped manifest layout. */
+function validateManifest(manifest: VersionManifest): VersionManifest {
+  if (manifest.schemaVersion !== '2.0.0') {
+    throw new Error('Expected version manifest schemaVersion 2.0.0.');
+  }
+  for (const [repoName, repo] of Object.entries(manifest.repositories)) {
+    if (!repo.packages || 'images' in repo || 'lambdas' in repo) {
+      throw new Error(`Repository '${repoName}' must use package-scoped manifest entries.`);
+    }
+  }
+  return manifest;
 }
 
 /** Reset the in-memory cache (useful in tests). */
@@ -104,20 +124,21 @@ export function _resetManifestCache(): void {
 
 /** Inject manifest data directly (for tests - avoids filesystem mocking). */
 export function _loadManifestFromData(manifest: VersionManifest): void {
-  manifestCache = manifest;
+  manifestCache = validateManifest(manifest);
 }
 
 /** Resolve an artifact entry to what deploys, throwing a descriptive error when absent. */
 function resolve<T>(
   entries: Record<string, ManifestEntry<T>> | undefined,
   repoName: string,
+  packageName: string,
   kind: 'images' | 'lambdas',
   artifactName: string
 ): T {
   const entry = entries?.[artifactName];
   if (entry === undefined) {
     throw new Error(
-      `Artifact '${repoName}/${kind}/${artifactName}' not found in ${VERSION_MANIFEST_PATH}.\n` +
+      `Artifact '${repoName}/${packageName}/${kind}/${artifactName}' not found in ${VERSION_MANIFEST_PATH}.\n` +
         'Entries are added by the source repo deploy workflow (seilbahn update-version-manifest).'
     );
   }
@@ -128,7 +149,7 @@ function resolve<T>(
  * Get a named Lambda artifact from the manifest (the `pinned` block if present, else `latest`).
  *
  * @example
- * const artifact = getLambdaArtifact('sample-python-repo', 'sample-etl-pipeline');
+ * const artifact = getLambdaArtifact('sample-python-repo', 'sample-python-repo', 'sample-etl-pipeline');
  * new lambda.Function(this, 'Fn', {
  *   code: lambda.Code.fromBucket(
  *     s3.Bucket.fromBucketName(this, 'Bucket', artifact.bucket),
@@ -138,21 +159,29 @@ function resolve<T>(
  *   ...
  * });
  */
-export function getLambdaArtifact(repoName: string, artifactName: string): LambdaArtifact {
-  const lambdas = loadManifest().repositories[repoName]?.lambdas;
-  return resolve(lambdas, repoName, 'lambdas', artifactName);
+export function getLambdaArtifact(
+  repoName: string,
+  packageName: string,
+  artifactName: string
+): LambdaArtifact {
+  const lambdas = loadManifest().repositories[repoName]?.packages[packageName]?.lambdas;
+  return resolve(lambdas, repoName, packageName, 'lambdas', artifactName);
 }
 
 /**
  * Get a named container image artifact from the manifest (the `pinned` block if present, else `latest`).
  *
  * @example
- * const artifact = getImageArtifact('sample-python-repo', 'sample-etl-pipeline');
+ * const artifact = getImageArtifact('sample-python-repo', 'sample-python-repo', 'sample-etl-pipeline');
  * const image = getContainerImage(this, 'SampleImage', artifact);
  */
-export function getImageArtifact(repoName: string, artifactName: string): ContainerArtifact {
-  const images = loadManifest().repositories[repoName]?.images;
-  return resolve(images, repoName, 'images', artifactName);
+export function getImageArtifact(
+  repoName: string,
+  packageName: string,
+  artifactName: string
+): ContainerArtifact {
+  const images = loadManifest().repositories[repoName]?.packages[packageName]?.images;
+  return resolve(images, repoName, packageName, 'images', artifactName);
 }
 
 /**

@@ -10,8 +10,7 @@
       "description": "JSON Schema reference"
     },
     "schemaVersion": {
-      "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "const": "2.0.0",
       "description": "Semantic version of the manifest schema"
     },
     "repositories": {
@@ -21,28 +20,41 @@
         "^[a-zA-Z0-9-_]+$": {
           "type": "object",
           "description": "Repository with one or more named artifacts",
-          "required": ["source"],
+          "required": ["source", "packages"],
           "properties": {
             "source": {
               "type": "string",
               "description": "Source repository (owner/repo) that produces these artifacts"
             },
-            "images": {
+            "packages": {
               "type": "object",
-              "description": "Map of named container image entries",
+              "description": "Packages named by seilbahn.toml",
               "patternProperties": {
                 "^[a-zA-Z0-9-_]+$": {
-                  "$ref": "#/$defs/containerEntry"
-                }
-              },
-              "additionalProperties": false
-            },
-            "lambdas": {
-              "type": "object",
-              "description": "Map of named Lambda entries",
-              "patternProperties": {
-                "^[a-zA-Z0-9-_]+$": {
-                  "$ref": "#/$defs/lambdaEntry"
+                  "type": "object",
+                  "properties": {
+                    "images": {
+                      "type": "object",
+                      "description": "Map of named container image entries",
+                      "patternProperties": {
+                        "^[a-zA-Z0-9-_]+$": {
+                          "$ref": "#/$defs/containerEntry"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "lambdas": {
+                      "type": "object",
+                      "description": "Map of named Lambda entries",
+                      "patternProperties": {
+                        "^[a-zA-Z0-9-_]+$": {
+                          "$ref": "#/$defs/lambdaEntry"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false

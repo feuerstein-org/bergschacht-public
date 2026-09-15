@@ -39,7 +39,11 @@ export class TableManagerProvider extends Construct {
   constructor(scope: Construct, id: string, props: TableManagerProviderProps) {
     super(scope, id);
 
-    const artifact = getLambdaArtifact('bergschacht-custom-resources', 's3tables-table-manager');
+    const artifact = getLambdaArtifact(
+      'bergschacht-custom-resources',
+      's3tables-table-manager',
+      's3tables-table-manager'
+    );
 
     const artifactBucket = s3.Bucket.fromBucketName(this, 'ArtifactBucket', artifact.bucket);
 

@@ -81,14 +81,14 @@ export interface FoerderturmStackProps extends cdk.StackProps {
   /**
    * Dagster container image artifact resolved from the version manifest.
    * Used for the dagster-init, dagster-webserver, and dagster-daemon containers.
-   * @example getImageArtifact('foerderturm', 'foerderturm')
+   * @example getImageArtifact('foerderturm', 'foerderturm', 'dagster')
    */
   readonly dagsterImageArtifact: ContainerArtifact;
   /**
    * Tailscale container image artifact resolved from the version manifest. Same ECR repo as
    * the Dagster image, baked with `/etc/tailscale/serve.json` so we don't need
    * to inject the serve config from this stack.
-   * @example getImageArtifact('foerderturm', 'foerderturm-tailscale')
+   * @example getImageArtifact('foerderturm', 'foerderturm', 'tailscale')
    */
   readonly tailscaleImageArtifact: ContainerArtifact;
   /**

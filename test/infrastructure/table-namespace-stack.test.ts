@@ -41,12 +41,16 @@ const testArtifact = {
  */
 function createStack(tables: TableDefinition[]) {
   _loadManifestFromData({
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     repositories: {
       'bergschacht-custom-resources': {
         source: 'feuerstein-org/bergschacht-custom-resources',
-        lambdas: {
-          's3tables-table-manager': { latest: testArtifact },
+        packages: {
+          's3tables-table-manager': {
+            lambdas: {
+              's3tables-table-manager': { latest: testArtifact },
+            },
+          },
         },
       },
     },

@@ -20,9 +20,9 @@ CDK infrastructure for Feuerstein. Application packages live in separate reposit
 │                                                         │
 │  version-manifests/latest.json  (committed)             │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │ repositories.{repo}.lambdas.{name} = {           │   │
-│  │   latest: {...}, pinned?: {...} }                │   │
-│  │ repositories.{repo}.images.{name}  = { ... }     │   │
+│  │ repositories.{repo}.packages.{package}           │   │
+│  │   .{images|lambdas}.{name} = {                   │   │
+│  │     latest: {...}, pinned?: {...} }              │   │
 │  └──────────────────────────────────────────────────┘   │
 │                           │ getLambdaArtifact()         │
 │                           │ / getImageArtifact()        │
@@ -105,8 +105,8 @@ mise run synth              # Build & synthesize stacks
 mise run diff               # Show diff for stacks
 mise run deploy             # Deploy stacks to AWS
 mise run deploy-express     # Deploy in CloudFormation express mode (dev iteration)
-mise run pin -- <repo> <images|lambdas> <name> <reason>  # Pin an artifact at its current version
-mise run unpin -- <repo> <images|lambdas> <name>         # Drop the pin; latest deploys again
+mise run pin -- <repo> <package> <images|lambdas> <name> <reason>  # Pin an artifact at its current version
+mise run unpin -- <repo> <package> <images|lambdas> <name>         # Drop the pin - latest deploys again
 
 # Or use pnpm directly
 pnpm run build
@@ -323,7 +323,7 @@ For infrastructure changes pushed to `master`, `deploy.yml` runs `cdk synth`, co
 To freeze an artifact while its source repo keeps releasing:
 
 ```bash
-mise run pin -- foerderturm images dagster "0.7.0 breaks X, see #123"
+mise run pin -- foerderturm foerderturm images dagster "0.7.0 breaks X, see #123"
 # copies `latest` into a `pinned` block (which deploys instead) and records the reason.
 # To pin an *older* version, edit the pinned block manually - copy it from git history.
 git commit && git push   # the push triggers the deploy
@@ -332,7 +332,7 @@ git commit && git push   # the push triggers the deploy
 While pinned, app repo deploys keep advancing `latest` (so the newest published version stays visible in the manifest) but never touch `pinned`. To release the pin:
 
 ```bash
-mise run unpin -- foerderturm images dagster # removes the pinned block; latest deploys again
+mise run unpin -- foerderturm foerderturm images dagster # removes the pinned block; latest deploys again
 ```
 
 ### Rollback
@@ -347,36 +347,40 @@ mise run unpin -- foerderturm images dagster # removes the pinned block; latest 
 ```json
 {
   "$schema": "./version-manifest.schema.json",
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "repositories": {
     "sample-python-repo": {
       "source": "feuerstein-org/sample-python-repo",
-      "lambdas": {
-        "sample-etl-pipeline": {
-          "latest": {
-            "bucket": "example-lambda-artifacts",
-            "key": "sample-python-repo/sample-etl-pipeline-0.1.0.zip",
-            "objectVersion": "AbCdEf1234567890",
-            "version": "0.1.0",
-            "commitSha": "abc123..."
+      "packages": {
+        "sample-python-repo": {
+          "lambdas": {
+            "sample-etl-pipeline": {
+              "latest": {
+                "bucket": "example-lambda-artifacts",
+                "key": "sample-python-repo/sample-python-repo.sample-etl-pipeline.0.1.0.zip",
+                "objectVersion": "AbCdEf1234567890",
+                "version": "0.1.0",
+                "commitSha": "abc123..."
+              }
+            }
+          },
+          "images": {
+            "sample-etl-pipeline": {
+              "latest": {
+                "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+                "imageTag": "sample-python-repo.sample-python-repo.sample-etl-pipeline.0.2.0",
+                "version": "0.2.0",
+                "commitSha": "def456..."
+              },
+              "pinned": {
+                "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
+                "imageTag": "sample-python-repo.sample-python-repo.sample-etl-pipeline.0.1.0",
+                "version": "0.1.0",
+                "commitSha": "abc123..."
+              },
+              "pinReason": "0.2.0 breaks X, see #123"
+            }
           }
-        }
-      },
-      "images": {
-        "sample-etl-pipeline": {
-          "latest": {
-            "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-            "imageTag": "sample-python-repo-sample-etl-pipeline-0.2.0",
-            "version": "0.2.0",
-            "commitSha": "def456..."
-          },
-          "pinned": {
-            "repository": "123456789.dkr.ecr.us-east-1.amazonaws.com/feuerstein",
-            "imageTag": "sample-python-repo-sample-etl-pipeline-0.1.0",
-            "version": "0.1.0",
-            "commitSha": "abc123..."
-          },
-          "pinReason": "0.2.0 breaks X, see #123"
         }
       }
     }
@@ -410,9 +414,9 @@ import { getLambdaArtifact, getImageArtifact } from '../lib/config/version-manif
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 
-// Get Lambda package configuration. Pass repo name and artifact name.
+// Get Lambda package configuration. Pass repo name, package name and artifact name.
 // Reads from version-manifests/latest.json (the `pinned` block if present, else `latest`)
-const lambdaConfig = getLambdaArtifact('order-processor', 'order-processor');
+const lambdaConfig = getLambdaArtifact('order-processor', 'order-processor', 'order-processor');
 
 new lambda.Function(this, 'OrderProcessor', {
   code: lambda.Code.fromBucket(
@@ -424,13 +428,13 @@ new lambda.Function(this, 'OrderProcessor', {
 });
 
 // Get image artifact
-const imageConfig = getImageArtifact('order-processor', 'order-processor');
+const imageConfig = getImageArtifact('order-processor', 'order-processor', 'order-processor');
 // Use imageConfig.repository and imageConfig.imageTag
 
 // Multi-artifact repo: get specific named artifacts
-const workerImage = getImageArtifact('order-service', 'worker');
-const apiImage = getImageArtifact('order-service', 'api');
-const webhookLambda = getLambdaArtifact('order-service', 'webhook');
+const workerImage = getImageArtifact('order-service', 'main', 'worker');
+const apiImage = getImageArtifact('order-service', 'main', 'api');
+const webhookLambda = getLambdaArtifact('order-service', 'main', 'webhook');
 ```
 
 ## Deployment Model

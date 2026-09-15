@@ -86,7 +86,7 @@ export class EnvironmentStage extends cdk.Stage {
       // Shared erzlager table bucket
       // ---------------------------------------------------------------
       const erzlager = new TableBucketStack(this, 'S3TablesErzlager', {
-        tableBucketName: `example-erzlager-${id}`.toLowerCase(),
+        tableBucketName: `example-tables-${id}`.toLowerCase(),
         encryptionKey: dataEncryptionKey.key,
         env: { account: props.accountId, region: props.awsRegion },
       });
@@ -133,8 +133,8 @@ export class EnvironmentStage extends cdk.Stage {
       }[props.accountId];
 
       if (foerderturmConfig) {
-        const foerderturmImage = (artifactName: string): ContainerArtifact =>
-          getImageArtifact('foerderturm', artifactName);
+        const foerderturmImage = (packageName: string, artifactName: string): ContainerArtifact =>
+          getImageArtifact('foerderturm', packageName, artifactName);
 
         // Out-of-band SecureString - see README.md#manual-secrets.
         const massiveApiKeyParam = `/foerderturm-${props.environment}/massive/api-key`;
@@ -145,16 +145,18 @@ export class EnvironmentStage extends cdk.Stage {
         // carries the bronze/staging/SSM data-plane grants.
         new FoerderturmStack(this, 'Foerderturm', {
           environment: props.environment,
-          dagsterImageArtifact: foerderturmImage('dagster'),
-          tailscaleImageArtifact: foerderturmImage('tailscale'),
+          dagsterImageArtifact: foerderturmImage('foerderturm', 'dagster'),
+          tailscaleImageArtifact: foerderturmImage('foerderturm', 'tailscale'),
           bronze,
           workers: {
             massive: {
-              image: foerderturmImage('connector-massive-worker'),
+              image: foerderturmImage('connector-massive', 'connector-massive-worker'),
               ssmSecureParams: { MASSIVE_API_KEY_SSM_PARAMETER: massiveApiKeyParam },
             },
-            sharadar: { image: foerderturmImage('connector-sharadar-worker') },
-            example: { image: foerderturmImage('connector-example-worker') },
+            sharadar: {
+              image: foerderturmImage('connector-sharadar', 'connector-sharadar-worker'),
+            },
+            example: { image: foerderturmImage('connector-example', 'connector-example-worker') },
           },
           tailscaleHostname: foerderturmConfig.tailscaleHostname,
           lifecycle: foerderturmConfig.lifecycle,
