@@ -42,7 +42,7 @@ const TEST_RUNWORKER_IMAGES = {
   },
 };
 
-const BRONZE_BUCKET_ARN = 'arn:aws:s3tables:us-east-1:123456789012:bucket/example-erzlager-test';
+const BRONZE_BUCKET_ARN = 'arn:aws:s3tables:us-east-1:123456789012:bucket/example-tables-test';
 const MASSIVE_API_KEY_PARAM = '/foerderturm-test/massive/api-key';
 
 /** Run-worker profiles: image, secrets, per-worker env, and Fargate size. */

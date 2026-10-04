@@ -8,7 +8,7 @@ import { SharedKmsKeyStack } from '../infrastructure/shared-kms-key-stack.ts';
 import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty.ts';
 import { BRONZE_TABLES } from '../infrastructure/schemas/index.ts';
 import { FoerderturmStack } from '../infrastructure/foerderturm-stack.ts';
-import { devAccount, stageAccount, prodAccount } from '../config/constants.ts';
+import { devAccount, stageAccount, prodAccount, tableBucketPrefix } from '../config/constants.ts';
 import { type ContainerArtifact, getImageArtifact } from '../config/version-manifest.ts';
 
 export interface EnvironmentStageProps extends cdk.StageProps {
@@ -86,7 +86,7 @@ export class EnvironmentStage extends cdk.Stage {
       // Shared erzlager table bucket
       // ---------------------------------------------------------------
       const erzlager = new TableBucketStack(this, 'S3TablesErzlager', {
-        tableBucketName: `example-tables-${id}`.toLowerCase(),
+        tableBucketName: `${tableBucketPrefix}-${id}`.toLowerCase(),
         encryptionKey: dataEncryptionKey.key,
         env: { account: props.accountId, region: props.awsRegion },
       });

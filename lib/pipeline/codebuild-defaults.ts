@@ -12,3 +12,14 @@ export const PIPELINE_CODEBUILD_DEFAULTS: pipelines.CodeBuildOptions = {
     computeType: codebuild.ComputeType.LAMBDA_2GB,
   },
 };
+
+/** Synthesize from the code and configuration in the same source checkout. */
+export const PIPELINE_SYNTH_OPTIONS = {
+  commands: [
+    'npm install -g pnpm',
+    'pnpm install --frozen-lockfile',
+    'pnpm run build',
+    'pnpx cdk synth',
+  ],
+  primaryOutputDirectory: 'cdk.out',
+};

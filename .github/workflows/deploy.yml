@@ -42,7 +42,7 @@ jobs:
   # Synth CDK templates and compare checksums to detect real changes.
   # Only runs in auto mode (push to master). Skipped for explicit pipeline selection.
   synth-detect:
-    if: inputs.pipeline == '' || inputs.pipeline == 'auto'
+    if: github.event.repository.private && (inputs.pipeline == '' || inputs.pipeline == 'auto')
     runs-on: ubuntu-latest
     environment:
       name: dev
@@ -142,7 +142,7 @@ jobs:
   # For auto mode, reads synth-detect outputs. For explicit mode, uses the input directly.
   resolve:
     needs: synth-detect
-    if: always()
+    if: always() && github.event.repository.private
     runs-on: ubuntu-latest
     outputs:
       trigger_infra: ${{ steps.resolve.outputs.trigger_infra }}

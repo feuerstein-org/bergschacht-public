@@ -7,7 +7,7 @@ import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
 import { CicdStage } from './cicd-stage.ts';
 import type { ApplicationRepo } from '../config/constants.ts';
-import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults.ts';
+import { PIPELINE_CODEBUILD_DEFAULTS, PIPELINE_SYNTH_OPTIONS } from './codebuild-defaults.ts';
 
 export interface InfrastructurePipelineStackProps extends cdk.StackProps {
   /**
@@ -118,13 +118,7 @@ export class InfrastructurePipelineStack extends cdk.Stack {
             triggerOnPush: false,
           }
         ),
-        commands: [
-          'npm install -g pnpm',
-          'pnpm install --frozen-lockfile',
-          'pnpm run build',
-          'pnpx cdk synth',
-        ],
-        primaryOutputDirectory: 'cdk.out',
+        ...PIPELINE_SYNTH_OPTIONS,
       }),
       codeBuildDefaults: PIPELINE_CODEBUILD_DEFAULTS,
       dockerEnabledForSynth: false,
@@ -132,6 +126,8 @@ export class InfrastructurePipelineStack extends cdk.Stack {
     });
 
     const cicdStage = new CicdStage(this, 'Cicd', {
+      githubOwner: props.githubOwner,
+      githubRepo: props.githubRepo,
       cicdAccountId: props.cicdAccountId,
       devAccountId: props.devAccountId,
       stageAccountId: props.stageAccountId,

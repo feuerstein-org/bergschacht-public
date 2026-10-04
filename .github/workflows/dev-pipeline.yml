@@ -18,6 +18,7 @@ env:
 
 jobs:
   trigger:
+    if: github.event.repository.private
     runs-on: ubuntu-latest
     environment:
       name: prod

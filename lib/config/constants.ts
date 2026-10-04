@@ -9,13 +9,16 @@ export const devAccount = process.env.DEV_ACCOUNT_ID || '222222222222';
 export const stageAccount = process.env.STAGE_ACCOUNT_ID || '333333333333';
 export const prodAccount = process.env.PROD_ACCOUNT_ID || '444444444444';
 export const awsRegion = process.env.AWS_REGION || 'us-east-1';
-export const pagerDutyEmail =
-  process.env.PAGERDUTY_EMAIL || 'alerts@example.invalid';
+export const pagerDutyEmail = process.env.PAGERDUTY_EMAIL || 'alerts@example.com';
 // export const eodhdApiKey = process.env.EODHD_API_KEY!;
 
 // GitHub organization and repository
 export const githubOrg = process.env.GITHUB_ORG || 'feuerstein-org';
 export const githubRepo = process.env.GITHUB_REPO || 'bergschacht';
+
+export const centralLoggingBucketName = 'example-cicd-logs';
+export const lambdaArtifactsBucketName = 'example-lambda-artifacts';
+export const tableBucketPrefix = 'example-tables';
 
 /**
  * Naming for the Dagster run-worker ECS tasks the orchestrator launches via the

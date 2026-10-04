@@ -45,6 +45,7 @@ jobs:
         run: mise run install-ci
 
       - name: Configure AWS credentials
+        if: github.event.repository.private
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ env.CICD_ACCOUNT_ID }}:role/${{ github.event.repository.name }}-dev-github-actions-role
@@ -58,4 +59,9 @@ jobs:
         run: mise run test-ci
 
       - name: Diff CDK
+        if: github.event.repository.private
         run: mise run diff-ci
+
+      - name: Synthesize public example
+        if: ${{ !github.event.repository.private }}
+        run: pnpm run cdk synth '**' --no-lookups --quiet

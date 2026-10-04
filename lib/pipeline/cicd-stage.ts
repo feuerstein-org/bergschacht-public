@@ -10,9 +10,17 @@ import { ReadOnlyRoleStack } from '../infrastructure/readonly-role-stack.ts';
 import { GitHubOIDCProviderStack } from './github-oidc-provider-stack.ts';
 import { GitHubActionsStack } from './github-actions-stack.ts';
 import { createApplicationRepoGitHubActions } from './application-repo-github-actions-stack.ts';
-import type { ApplicationRepo } from '../config/constants.ts';
+import {
+  type ApplicationRepo,
+  centralLoggingBucketName,
+  lambdaArtifactsBucketName,
+} from '../config/constants.ts';
 
 export interface CicdStageProps extends cdk.StageProps {
+  /** Owner of the repository whose Actions control deployments. */
+  readonly githubOwner: string;
+  /** Repository whose Actions control deployments. */
+  readonly githubRepo: string;
   /**
    * The CICD account ID
    */
@@ -77,8 +85,8 @@ export class CicdStage extends cdk.Stage {
 
     // GitHub Actions Stack - sets up IAM roles for GitHub Actions to run CDK diff
     new GitHubActionsStack(this, 'FeuersteinBergschachtDevGitHubActions', {
-      githubOrg: 'feuerstein-org',
-      githubRepo: 'bergschacht',
+      githubOrg: props.githubOwner,
+      githubRepo: props.githubRepo,
       githubEnvironment: 'dev',
       lookupAccountIds: [
         [cicdAccountId, 'CICD'],
@@ -92,8 +100,8 @@ export class CicdStage extends cdk.Stage {
 
     // GitHub Actions Stack - sets up IAM roles for GitHub Actions to deploy artifacts and trigger pipeline
     new GitHubActionsStack(this, 'FeuersteinBergschachtProdGitHubActions', {
-      githubOrg: 'feuerstein-org',
-      githubRepo: 'bergschacht',
+      githubOrg: props.githubOwner,
+      githubRepo: props.githubRepo,
       githubEnvironment: 'prod',
       lookupAccountIds: [
         [cicdAccountId, 'CICD'],
@@ -141,8 +149,8 @@ export class CicdStage extends cdk.Stage {
           effect: iam.Effect.ALLOW,
           actions: ['s3:PutObject', 's3:GetObject', 's3:ListBucket'],
           resources: [
-            'arn:aws:s3:::example-lambda-artifacts',
-            'arn:aws:s3:::example-lambda-artifacts/*',
+            `arn:aws:s3:::${lambdaArtifactsBucketName}`,
+            `arn:aws:s3:::${lambdaArtifactsBucketName}/*`,
           ],
         }),
         // Permission to use the KMS key for encryption
@@ -165,14 +173,14 @@ export class CicdStage extends cdk.Stage {
 
     // Create centralized logging bucket for CI/CD account
     const centralLoggingBucket = new CentralLoggingBucketStack(this, 'CentralLoggingBucket', {
-      bucketName: 'example-cicd-logs',
+      bucketName: centralLoggingBucketName,
       encryptionKeyArn,
       env: { account: cicdAccountId, region: awsRegion },
     });
 
     // Deploy Lambda Artifacts S3 bucket in CI/CD account with shared KMS key
     const lambdaArtifactsStack = new LambdaArtifactsStack(this, 'LambdaArtifacts', {
-      bucketName: 'example-lambda-artifacts',
+      bucketName: lambdaArtifactsBucketName,
       allowedAccountIds: [devAccountId, stageAccountId, prodAccountId],
       encryptionKeyArn,
       serverAccessLogsBucket: centralLoggingBucket.bucket,

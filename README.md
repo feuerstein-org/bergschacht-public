@@ -2,6 +2,14 @@
 
 CDK infrastructure for Feuerstein. Application packages live in separate repositories and deploy their artifacts (Docker images, Lambda packages) to AWS. After deployment, they commit an update to the version manifest (`version-manifests/latest.json`) in this repo, which triggers the CDK production pipeline. A git commit of this repo therefore fully determines the deployed artifact set - pinning and rollback are plain git operations. This documentation describes how the application code is deployed as well.
 
+This is how I designed the deployment pipeline for my personal project which I decided to open source - essentially I'm building a financial data analysis system on AWS. It's set up in a way where you should be able to fork it and use it on your own.
+
+For your own deployment, [duplicate the repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/duplicating-a-repository) into a new private repository.
+The deployment workflows here run only in private repositories. In your clone, use `origin` for your private repository and `upstream` for this one. Set your deployment values and `applicationRepos` in `lib/config/constants.ts`. Update `version-manifests/latest.json` to reference your own artifacts.
+Follow [Initial setup](#initial-setup) to configure AWS and GitHub. Before you synthesize with your AWS credentials, clear the example entries in `cdk.context.json` with `pnpm exec cdk context --clear`.
+
+Fetch updates from `upstream` and merge them into your private copy. For public contributions, use a separate checkout of your public fork.
+
 ## Architecture
 
 ```

@@ -6,7 +6,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { NagSuppressions } from 'cdk-nag';
 import { EnvironmentStage } from './environment-stage.ts';
-import { PIPELINE_CODEBUILD_DEFAULTS } from './codebuild-defaults.ts';
+import { PIPELINE_CODEBUILD_DEFAULTS, PIPELINE_SYNTH_OPTIONS } from './codebuild-defaults.ts';
 
 export interface DevelopmentPipelineStackProps extends cdk.StackProps {
   /**
@@ -104,13 +104,7 @@ export class DevelopmentPipelineStack extends cdk.Stack {
       codePipeline: underlyingPipeline,
       synth: new pipelines.CodeBuildStep('Synth', {
         input: source,
-        commands: [
-          'npm install -g pnpm',
-          'pnpm install --frozen-lockfile',
-          'pnpm run build',
-          'pnpx cdk synth',
-        ],
-        primaryOutputDirectory: 'cdk.out',
+        ...PIPELINE_SYNTH_OPTIONS,
       }),
       codeBuildDefaults: PIPELINE_CODEBUILD_DEFAULTS,
       dockerEnabledForSynth: false,
