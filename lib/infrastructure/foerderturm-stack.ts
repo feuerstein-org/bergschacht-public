@@ -240,7 +240,9 @@ export class FoerderturmStack extends cdk.Stack {
       credentials: rds.Credentials.fromGeneratedSecret('dagster', {
         secretName: `foerderturm-${environment}/dagster/db`,
       }),
-      backupRetention: cdk.Duration.days(7),
+      // TODO: Raise back to 7 once the DB runs most of the day. RDS counts only running time
+      // towards retention, so with the lifecycle 7 days keeps ~6 months of snapshots.
+      backupRetention: cdk.Duration.days(1),
       // Hardcoded, any lifecycle rules should adhere to these, see foerderturm-lifecycle.ts class docstring.
       preferredBackupWindow: '10:50-11:20',
       preferredMaintenanceWindow: 'Sun:03:15-Sun:03:45',
