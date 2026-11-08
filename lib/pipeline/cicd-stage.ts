@@ -7,6 +7,7 @@ import { LambdaArtifactsStack } from '../infrastructure/lambda-artifacts-stack.t
 import { EcrStack } from '../infrastructure/ecr-stack.ts';
 import { SnsPagerDutyStack } from '../infrastructure/sns-pager-duty.ts';
 import { ReadOnlyRoleStack } from '../infrastructure/readonly-role-stack.ts';
+import { AccountCustomizationStack } from '../infrastructure/account-customization-stack.ts';
 import { GitHubOIDCProviderStack } from './github-oidc-provider-stack.ts';
 import { GitHubActionsStack } from './github-actions-stack.ts';
 import { createApplicationRepoGitHubActions } from './application-repo-github-actions-stack.ts';
@@ -230,5 +231,21 @@ export class CicdStage extends cdk.Stage {
       trustedArns: [cicdAccountId],
       env: { account: prodAccountId, region: awsRegion },
     });
+
+    // AWS Console color and visible regions for each account
+    const accountColors = [
+      ['Cicd', cicdAccountId, 'pink'],
+      ['Dev', devAccountId, 'green'],
+      ['Stage', stageAccountId, 'yellow'],
+      ['Prod', prodAccountId, 'red'],
+    ] as const;
+    for (const [name, account, accountColor] of accountColors) {
+      new AccountCustomizationStack(this, `${name}AccountCustomization`, {
+        accountColor,
+        // Sometimes test machiens are deployed in the EU
+        visibleRegions: [awsRegion, 'eu-west-1', 'eu-central-1'],
+        env: { account, region: awsRegion },
+      });
+    }
   }
 }
