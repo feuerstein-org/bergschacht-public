@@ -228,7 +228,7 @@ describe('FoerderturmStack', () => {
       Memory: '2048',
       RequiresCompatibilities: ['FARGATE'],
       RuntimePlatform: {
-        CpuArchitecture: 'X86_64',
+        CpuArchitecture: 'ARM64',
         OperatingSystemFamily: 'LINUX',
       },
       ContainerDefinitions: Match.arrayWith([

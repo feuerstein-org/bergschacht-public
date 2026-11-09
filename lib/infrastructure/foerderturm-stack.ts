@@ -500,7 +500,7 @@ export class FoerderturmStack extends cdk.Stack {
       cpu: cpu,
       memoryLimitMiB: memoryMiB,
       runtimePlatform: {
-        cpuArchitecture: ecs.CpuArchitecture.X86_64,
+        cpuArchitecture: ecs.CpuArchitecture.ARM64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
       },
     });
